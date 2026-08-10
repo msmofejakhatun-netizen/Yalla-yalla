@@ -1,0 +1,51 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="520dp"
+    android:height="380dp"
+    android:viewportWidth="520"
+    android:viewportHeight="380">
+
+    <!-- 3D Red-Orange Extrusion Top Yalla -->
+    <path
+        android:fillColor="#D82300"
+        android:strokeColor="#A01500"
+        android:strokeWidth="1"
+        android:pathData="M 45,115 L 55,125 L 115,125 L 155,55 L 145,45 Z M 140,125 L 150,135 L 245,135 L 235,125 Z M 230,125 L 240,135 L 310,135 L 300,125 Z M 300,125 L 310,135 L 380,135 L 370,125 Z M 365,125 L 375,135 L 470,135 L 460,125 Z" />
+
+    <!-- Outer White Contour Outline Top Yalla -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="12"
+        android:strokeLineJoin="round"
+        android:pathData="M 45,115 L 70,45 L 105,45 L 90,85 L 120,45 L 150,45 L 105,125 L 70,125 Z M 140,125 L 170,70 L 210,70 L 215,60 L 185,60 L 195,45 L 235,45 L 205,125 L 175,125 L 185,100 L 155,100 Z M 230,125 L 260,45 L 295,45 L 270,110 L 310,110 L 300,125 Z M 300,125 L 330,45 L 365,45 L 340,110 L 380,110 L 370,125 Z M 365,125 L 395,70 L 435,70 L 440,60 L 410,60 L 420,45 L 460,45 L 430,125 L 400,125 L 410,100 L 380,100 Z" />
+
+    <!-- Yellow Main Text Top Yalla -->
+    <path
+        android:fillColor="#FFC700"
+        android:strokeColor="#CC1F00"
+        android:strokeWidth="2.5"
+        android:strokeLineJoin="round"
+        android:pathData="M 45,115 L 70,45 L 105,45 L 90,85 L 120,45 L 150,45 L 105,125 L 70,125 Z M 140,125 L 170,70 L 210,70 L 215,60 L 185,60 L 195,45 L 235,45 L 205,125 L 175,125 L 185,100 L 155,100 Z M 230,125 L 260,45 L 295,45 L 270,110 L 310,110 L 300,125 Z M 300,125 L 330,45 L 365,45 L 340,110 L 380,110 L 370,125 Z M 365,125 L 395,70 L 435,70 L 440,60 L 410,60 L 420,45 L 460,45 L 430,125 L 400,125 L 410,100 L 380,100 Z" />
+
+    <!-- 3D Red-Orange Extrusion Bottom Yalla (y + 90px) -->
+    <path
+        android:fillColor="#D82300"
+        android:strokeColor="#A01500"
+        android:strokeWidth="1"
+        android:pathData="M 35,205 L 45,215 L 105,215 L 145,145 L 135,135 Z M 130,215 L 140,225 L 235,225 L 225,215 Z M 220,215 L 230,225 L 300,225 L 290,215 Z M 290,215 L 300,225 L 370,225 L 360,215 Z M 355,215 L 365,225 L 460,225 L 450,215 Z" />
+
+    <!-- Outer White Contour Outline Bottom Yalla -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="12"
+        android:strokeLineJoin="round"
+        android:pathData="M 35,205 L 60,135 L 95,135 L 80,175 L 110,135 L 140,135 L 95,215 L 60,215 Z M 130,215 L 160,160 L 200,160 L 205,150 L 175,150 L 185,135 L 225,135 L 195,215 L 165,215 L 175,190 L 145,190 Z M 220,215 L 250,135 L 285,135 L 260,200 L 300,200 L 290,215 Z M 290,215 L 320,135 L 355,135 L 330,200 L 370,200 L 360,215 Z M 355,215 L 385,160 L 425,160 L 430,150 L 400,150 L 410,135 L 450,135 L 420,215 L 390,215 L 400,190 L 370,190 Z" />
+
+    <!-- Yellow Main Text Bottom Yalla -->
+    <path
+        android:fillColor="#FFC700"
+        android:strokeColor="#CC1F00"
+        android:strokeWidth="2.5"
+        android:strokeLineJoin="round"
+        android:pathData="M 35,205 L 60,135 L 95,135 L 80,175 L 110,135 L 140,135 L 95,215 L 60,215 Z M 130,215 L 160,160 L 200,160 L 205,150 L 175,150 L 185,135 L 225,135 L 195,215 L 165,215 L 175,190 L 145,190 Z M 220,215 L 250,135 L 285,135 L 260,200 L 300,200 L 290,215 Z M 290,215 L 320,135 L 355,135 L 330,200 L 370,200 L 360,215 Z M 355,215 L 385,160 L 425,160 L 430,150 L 400,150 L 410,135 L 450,135 L 420,215 L 390,215 L 400,190 L 370,190 Z" />
+
+</vector>

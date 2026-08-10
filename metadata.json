@@ -1,0 +1,6 @@
+{
+  "name": "Yalla Yalla",
+  "description": "Yalla Yalla - High-Energy Custom Food Delivery App with Verified Restaurants, Yalla Coins, and Hyperlocal Delivery Engine",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

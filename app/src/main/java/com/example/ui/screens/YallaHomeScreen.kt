@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -15,96 +16,124 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.models.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
+import com.example.data.firebase.*
+import com.example.data.models.FoodCategory
 import com.example.ui.components.*
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.ArchitectureViewModel
 import com.example.ui.viewmodel.NavigationTab
 import com.example.ui.viewmodel.UiState
+import com.example.ui.viewmodel.YallaFirebaseViewModel
 
 @Composable
 fun YallaHomeScreen(
     viewModel: ArchitectureViewModel,
+    firebaseViewModel: YallaFirebaseViewModel,
     uiState: UiState,
     onViewCartClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var searchQuery by remember { mutableStateOf(uiState.searchQuery) }
-    var selectedCategory by remember { mutableStateOf(uiState.selectedCategory) }
+    val firebaseUiState by firebaseViewModel.uiState.collectAsStateWithLifecycle()
 
-    val allRestaurants = viewModel.getSampleRestaurants()
-    val categories = viewModel.getSampleCategories()
-    val offers = viewModel.getSampleOffers()
-
-    val filteredRestaurants = remember(searchQuery, selectedCategory, allRestaurants) {
-        allRestaurants.filter { restaurant ->
-            val matchesCategory = if (selectedCategory == "All" || selectedCategory.isEmpty()) {
-                true
-            } else if (selectedCategory == "Yalla Specials") {
-                restaurant.isPromoted || restaurant.rating >= 4.8
-            } else {
-                restaurant.cuisine.contains(selectedCategory, ignoreCase = true) ||
-                        restaurant.menu.any { it.name.contains(selectedCategory, ignoreCase = true) }
-            }
-
-            val matchesSearch = if (searchQuery.isBlank()) {
-                true
-            } else {
-                restaurant.name.contains(searchQuery, ignoreCase = true) ||
-                        restaurant.cuisine.contains(searchQuery, ignoreCase = true) ||
-                        restaurant.menu.any { it.name.contains(searchQuery, ignoreCase = true) }
-            }
-
-            matchesCategory && matchesSearch
-        }
-    }
+    val categories = listOf(
+        FoodCategory("1", "All", "🍽️", null),
+        FoodCategory("2", "Biryani", "🍲", "HOT"),
+        FoodCategory("3", "Pizza", "🍕", "50% OFF"),
+        FoodCategory("4", "Burger", "🍔", "POPULAR"),
+        FoodCategory("5", "North Indian", "🥘", null),
+        FoodCategory("6", "Healthy", "🥗", "FRESH"),
+        FoodCategory("7", "Desserts", "🍰", null)
+    )
 
     Box(modifier = modifier.fillMaxSize().background(YallaLightBg)) {
-        if (uiState.isViewingRestaurantMenu && uiState.selectedRestaurant != null) {
-            // Restaurant Menu Detailed View
+        if (firebaseUiState.isViewingRestaurantMenu && firebaseUiState.selectedRestaurant != null) {
+            // Restaurant Menu Detailed View (Firestore Synced)
             YallaRestaurantMenuDetailView(
-                restaurant = uiState.selectedRestaurant,
-                viewModel = viewModel,
-                uiState = uiState,
-                onBack = { viewModel.closeRestaurantMenu() }
+                restaurant = firebaseUiState.selectedRestaurant!!,
+                firebaseViewModel = firebaseViewModel,
+                dishes = firebaseUiState.filteredMenuItems,
+                cart = firebaseUiState.cart,
+                onBack = { firebaseViewModel.closeRestaurantMenu() },
+                onViewCartClick = onViewCartClick
             )
         } else {
-            // Home Main Feed
+            // Main Home Feed (100% Firestore Synced)
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 100.dp),
+                contentPadding = PaddingValues(bottom = 120.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Header
+                // 1. Dynamic Header with Firestore Address & Live GPS Status
                 item {
-                    YallaHeader(
-                        appName = "Yalla Yalla",
-                        location = uiState.deliveryLocation,
-                        yallaCoins = uiState.yallaCoinsBalance,
-                        onLocationClick = { },
-                        onProfileClick = { viewModel.selectTab(NavigationTab.YALLA_PROFILE) },
-                        onCoinsClick = { viewModel.selectTab(NavigationTab.YALLA_COINS) }
-                    )
+                    Column {
+                        YallaHeader(
+                            appName = "Yalla Yalla",
+                            location = firebaseUiState.deliveryLocation,
+                            yallaCoins = uiState.yallaCoinsBalance,
+                            onLocationClick = { },
+                            onProfileClick = { viewModel.selectTab(NavigationTab.YALLA_PROFILE) },
+                            onCoinsClick = { viewModel.selectTab(NavigationTab.YALLA_COINS) }
+                        )
+
+                        // Realtime Firebase Connection Badge
+                        Surface(
+                            color = Color(0xFFE8F5E9),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Color(0xFF81C784))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text("🟢", fontSize = 10.sp)
+                                    Text(
+                                        text = "LIVE FIRESTORE DATA SYNCED",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color(0xFF2E7D32),
+                                            fontSize = 10.sp
+                                        )
+                                    )
+                                }
+                                Text(
+                                    text = "${firebaseUiState.restaurants.size} Restaurants • ${firebaseUiState.menuItems.size} Dishes",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = Color(0xFF2E7D32),
+                                        fontSize = 10.sp
+                                    )
+                                )
+                            }
+                        }
+                    }
                 }
 
-                // Search Bar
+                // 2. Search Bar
                 item {
                     Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                         YallaSearchBar(
-                            searchQuery = searchQuery,
-                            onSearchChange = {
-                                searchQuery = it
-                                viewModel.setSearchQuery(it)
-                            }
+                            searchQuery = firebaseUiState.searchQuery,
+                            onSearchChange = { firebaseViewModel.setSearchQuery(it) }
                         )
                     }
                 }
 
-                // Horizontal Categories Rail
+                // 3. Dynamic Category Rail
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
@@ -118,51 +147,75 @@ fun YallaHomeScreen(
                         )
                         YallaCategoryRail(
                             categories = categories,
-                            selectedCategory = selectedCategory,
-                            onCategorySelect = {
-                                selectedCategory = it
-                                viewModel.setCategory(it)
-                            }
+                            selectedCategory = firebaseUiState.selectedCategory,
+                            onCategorySelect = { firebaseViewModel.setCategoryFilter(it) }
                         )
                     }
                 }
 
-                // Offers & Cashback Banner Carousel
+                // 4. Firestore Promotions & Deals Carousel
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
+                    if (firebaseUiState.promotions.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "FIRESTORE PROMOTIONS & DEALS",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        color = YallaTextSecondary,
+                                        letterSpacing = 1.sp
+                                    )
+                                )
+                                Text(
+                                    text = "Active Code: ${firebaseUiState.appliedPromoCode ?: "None"}",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = YallaOrange
+                                    )
+                                )
+                            }
+
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                items(firebaseUiState.promotions) { promo ->
+                                    FirestorePromoCard(
+                                        promo = promo,
+                                        isApplied = firebaseUiState.appliedPromoCode == promo.code,
+                                        onApply = { firebaseViewModel.applyPromoCode(promo.code) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 5. Loading Indicator / Empty State
+                if (firebaseUiState.isLoading) {
+                    item {
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .height(120.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = "EXCLUSIVE YALLA DEALS",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.Black,
-                                    color = YallaTextSecondary,
-                                    letterSpacing = 1.sp
-                                )
-                            )
-                            Text(
-                                text = "View All",
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = YallaOrange
-                                )
-                            )
-                        }
-                        ZomatoOfferCarousel(
-                            offers = offers,
-                            onClaimOffer = { offer: OfferBanner ->
-                                viewModel.applyOfferCode(offer.discountCode)
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator(color = YallaOrange)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Connecting to Firestore...", color = YallaTextSecondary)
                             }
-                        )
+                        }
                     }
                 }
 
-                // Section Header: Yalla Verified Restaurants
+                // 6. Section Header: Yalla Verified Firestore Restaurants
                 item {
                     Row(
                         modifier = Modifier
@@ -189,7 +242,7 @@ fun YallaHomeScreen(
                                     color = YallaGreenLight
                                 ) {
                                     Text(
-                                        text = "100% FRESH",
+                                        text = "LIVE FIRESTORE",
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             fontWeight = FontWeight.ExtraBold,
                                             color = YallaGreen,
@@ -200,40 +253,463 @@ fun YallaHomeScreen(
                                 }
                             }
                             Text(
-                                text = "Top-rated kitchens with 100% hygiene & superfast delivery",
+                                text = "Real-time menu, rating, and stock data from Firestore",
                                 style = MaterialTheme.typography.bodySmall.copy(color = YallaTextSecondary)
                             )
                         }
                     }
                 }
 
-                // Restaurant Cards List
-                items(filteredRestaurants) { restaurant ->
+                // 7. Restaurant Cards Feed from Firestore
+                items(firebaseUiState.filteredRestaurants) { rest ->
                     Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                        YallaRestaurantCard(
-                            restaurant = restaurant,
-                            onClick = { viewModel.openRestaurantMenu(restaurant) }
+                        FirestoreRestaurantCard(
+                            restaurant = rest,
+                            onClick = { firebaseViewModel.openRestaurantMenu(rest) }
+                        )
+                    }
+                }
+
+                // 8. Dynamic Menu & Dish Feed from Firestore `/restaurants/{id}/menu`
+                item {
+                    Text(
+                        text = "POPULAR DISHES (LIVE MENU)",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Black,
+                            color = YallaTextSecondary,
+                            letterSpacing = 1.sp
+                        ),
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)
+                    )
+                }
+
+                items(firebaseUiState.filteredMenuItems) { dish ->
+                    val quantity = firebaseUiState.cart.find { it.itemId == dish.id }?.quantity ?: 0
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        FirestoreDishCard(
+                            dish = dish,
+                            quantityInCart = quantity,
+                            onAddClick = { firebaseViewModel.addToCart(dish) },
+                            onRemoveClick = { firebaseViewModel.updateCartQuantity(dish.id, -1) }
                         )
                     }
                 }
             }
         }
 
-        // Floating Bottom Cart Bar with "Go to Cart" button
-        val cartCount = uiState.cart.fold(0) { acc, item -> acc + item.quantity }
-        val cartSubtotal = uiState.cart.fold(0.0) { acc, item -> acc + (item.item.price * item.quantity) }
-
-        if (cartCount > 0 && !uiState.isViewingRestaurantMenu) {
+        // Floating Bottom Cart Bar with exact Firestore cart total
+        if (firebaseUiState.cartTotalCount > 0 && !firebaseUiState.isViewingRestaurantMenu) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 72.dp)
             ) {
                 YallaCartBar(
-                    cartItemsCount = cartCount,
-                    cartTotal = cartSubtotal,
+                    cartItemsCount = firebaseUiState.cartTotalCount,
+                    cartTotal = firebaseUiState.totalAmount,
                     onGoToCartClick = onViewCartClick
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Dynamic Firestore Promotion Card Component
+ */
+@Composable
+private fun FirestorePromoCard(
+    promo: FirestorePromotionItem,
+    isApplied: Boolean,
+    onApply: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .width(280.dp)
+            .height(130.dp),
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(YallaOrange, YallaOrangeDark)
+                    )
+                )
+                .padding(14.dp)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color.White.copy(alpha = 0.25f)
+                    ) {
+                        Text(
+                            text = "CODE: ${promo.code}",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = promo.title,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Black,
+                            color = Color.White
+                        )
+                    )
+                    Text(
+                        text = promo.subtitle,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = Color.White.copy(alpha = 0.9f)
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Button(
+                    onClick = onApply,
+                    modifier = Modifier.height(32.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isApplied) YallaGreen else Color.White,
+                        contentColor = if (isApplied) Color.White else YallaOrange
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        text = if (isApplied) "✓ Applied" else "Apply Code",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Dynamic Firestore Restaurant Card Component
+ */
+@Composable
+private fun FirestoreRestaurantCard(
+    restaurant: FirestoreRestaurantItem,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        border = BorderStroke(1.dp, YallaBorder)
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp)
+            ) {
+                if (restaurant.imageUrl.isNotEmpty()) {
+                    AsyncImage(
+                        model = restaurant.imageUrl,
+                        contentDescription = restaurant.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(YallaOrangeLight),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("⚡ ${restaurant.name}", fontWeight = FontWeight.Bold, color = YallaOrange)
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f)),
+                                startY = 80f
+                            )
+                        )
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(bottomEnd = 12.dp, topStart = 20.dp),
+                    color = YallaGreen,
+                    modifier = Modifier.align(Alignment.TopStart)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("✓", color = Color.White, fontWeight = FontWeight.Black, fontSize = 10.sp)
+                        Text(
+                            text = "Yalla Verified",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 10.sp
+                            )
+                        )
+                    }
+                }
+            }
+
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = restaurant.name,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = YallaTextPrimary,
+                            fontSize = 16.sp
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = YallaGreen
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = "${restaurant.rating}",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = restaurant.cuisine,
+                    style = MaterialTheme.typography.bodySmall.copy(color = YallaTextSecondary),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Schedule,
+                        contentDescription = "Time",
+                        tint = YallaOrange,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "${restaurant.deliveryTimeMins} mins",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = YallaTextPrimary
+                        )
+                    )
+                    Text("•", color = Color.Gray)
+                    Text(
+                        text = "₹${restaurant.priceForTwo.toInt()} for two",
+                        style = MaterialTheme.typography.bodySmall.copy(color = YallaTextSecondary)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Dynamic Firestore Dish Card Component
+ */
+@Composable
+private fun FirestoreDishCard(
+    dish: FirestoreDishItem,
+    quantityInCart: Int,
+    onAddClick: () -> Unit,
+    onRemoveClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        border = BorderStroke(1.dp, YallaBorder)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(14.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 12.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    VegNonVegIcon(isVeg = dish.isVeg)
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = YallaGoldLight
+                    ) {
+                        Text(
+                            text = dish.category,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = YallaOrangeDark,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp
+                            ),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = dish.name,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = YallaTextPrimary
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = "₹${dish.price.toInt()}",
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        color = YallaTextPrimary
+                    )
+                )
+
+                if (dish.description.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = dish.description,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = YallaTextSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        ),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier.size(width = 105.dp, height = 105.dp),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = YallaLightBg,
+                    modifier = Modifier.fillMaxSize().padding(bottom = 12.dp)
+                ) {
+                    if (dish.imageUrl.isNotEmpty()) {
+                        AsyncImage(
+                            model = dish.imageUrl,
+                            contentDescription = dish.name,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize().background(YallaGoldLight),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = if (dish.isVeg) "🥗" else "🍗", fontSize = 32.sp)
+                        }
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color.White,
+                    shadowElevation = 4.dp,
+                    border = BorderStroke(1.dp, YallaOrange),
+                    modifier = Modifier.height(34.dp).width(88.dp)
+                ) {
+                    if (quantityInCart == 0) {
+                        Box(
+                            modifier = Modifier.fillMaxSize().clickable { onAddClick() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "ADD +",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = YallaOrange
+                                )
+                            )
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier.weight(1f).fillMaxHeight().clickable { onRemoveClick() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("-", fontWeight = FontWeight.Bold, color = YallaOrange, fontSize = 18.sp)
+                            }
+                            Text(
+                                text = "$quantityInCart",
+                                fontWeight = FontWeight.ExtraBold,
+                                color = YallaOrange,
+                                fontSize = 14.sp
+                            )
+                            Box(
+                                modifier = Modifier.weight(1f).fillMaxHeight().clickable { onAddClick() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("+", fontWeight = FontWeight.Bold, color = YallaOrange, fontSize = 18.sp)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -242,13 +718,15 @@ fun YallaHomeScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun YallaRestaurantMenuDetailView(
-    restaurant: RestaurantItem,
-    viewModel: ArchitectureViewModel,
-    uiState: UiState,
-    onBack: () -> Unit
+    restaurant: FirestoreRestaurantItem,
+    firebaseViewModel: YallaFirebaseViewModel,
+    dishes: List<FirestoreDishItem>,
+    cart: List<FirestoreCartItem>,
+    onBack: () -> Unit,
+    onViewCartClick: () -> Unit
 ) {
-    val cartCount = uiState.cart.fold(0) { acc, item -> acc + item.quantity }
-    val cartSubtotal = uiState.cart.fold(0.0) { acc, item -> acc + (item.item.price * item.quantity) }
+    val totalCount = cart.sumOf { it.quantity }
+    val totalAmount = cart.sumOf { it.price * it.quantity }
 
     Scaffold(
         topBar = {
@@ -289,38 +767,34 @@ private fun YallaRestaurantMenuDetailView(
             )
         },
         bottomBar = {
-            if (cartCount > 0) {
+            if (totalCount > 0) {
                 Surface(
                     color = YallaOrange,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
                     shape = RoundedCornerShape(16.dp),
                     shadowElevation = 8.dp
                 ) {
                     Row(
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .fillMaxWidth(),
+                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
                             Text(
-                                text = "$cartCount ITEMS • ₹${cartSubtotal.toInt()}",
+                                text = "$totalCount ITEMS • ₹${totalAmount.toInt()}",
                                 style = MaterialTheme.typography.titleSmall.copy(
                                     color = Color.White,
                                     fontWeight = FontWeight.ExtraBold
                                 )
                             )
                             Text(
-                                text = "Extra discounts with Yalla Coins applied",
+                                text = "Synced directly with Firestore Cart",
                                 style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.9f))
                             )
                         }
 
                         Button(
-                            onClick = { viewModel.selectTab(NavigationTab.YALLA_HOME) },
+                            onClick = onViewCartClick,
                             colors = ButtonDefaults.buttonColors(containerColor = Color.White),
                             shape = RoundedCornerShape(10.dp)
                         ) {
@@ -339,7 +813,6 @@ private fun YallaRestaurantMenuDetailView(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Restaurant Info Header
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -353,7 +826,10 @@ private fun YallaRestaurantMenuDetailView(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
                                 Surface(shape = RoundedCornerShape(6.dp), color = YallaGreen) {
                                     Text(
                                         text = "${restaurant.rating} ★",
@@ -364,7 +840,7 @@ private fun YallaRestaurantMenuDetailView(
                                 }
                                 Text("• ${restaurant.deliveryTimeMins} mins delivery", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                             }
-                            Text("₹${restaurant.priceForTwo} for two", color = Color.Gray, fontSize = 12.sp)
+                            Text("₹${restaurant.priceForTwo.toInt()} for two", color = Color.Gray, fontSize = 12.sp)
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -373,10 +849,9 @@ private fun YallaRestaurantMenuDetailView(
                 }
             }
 
-            // Menu Section Title
             item {
                 Text(
-                    text = "RECOMMENDED MENU ITEMS",
+                    text = "MENU ITEMS (REALTIME FIRESTORE)",
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontWeight = FontWeight.Black,
                         color = YallaTextSecondary,
@@ -385,14 +860,13 @@ private fun YallaRestaurantMenuDetailView(
                 )
             }
 
-            // Food Items
-            items(restaurant.menu) { item ->
-                val quantityInCart = uiState.cart.find { it.item.id == item.id }?.quantity ?: 0
-                ZomatoFoodItemCard(
-                    item = item,
+            items(dishes) { dish ->
+                val quantityInCart = cart.find { it.itemId == dish.id }?.quantity ?: 0
+                FirestoreDishCard(
+                    dish = dish,
                     quantityInCart = quantityInCart,
-                    onAddClick = { viewModel.addToCart(item) },
-                    onRemoveClick = { viewModel.removeFromCart(item) }
+                    onAddClick = { firebaseViewModel.addToCart(dish) },
+                    onRemoveClick = { firebaseViewModel.updateCartQuantity(dish.id, -1) }
                 )
             }
         }

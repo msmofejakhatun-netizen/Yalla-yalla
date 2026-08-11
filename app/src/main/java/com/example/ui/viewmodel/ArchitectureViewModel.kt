@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 
 enum class NavigationTab {
     YALLA_HOME,
+    YALLA_FIREBASE,
     YALLA_ORDERS,
     YALLA_COINS,
     YALLA_PROFILE,

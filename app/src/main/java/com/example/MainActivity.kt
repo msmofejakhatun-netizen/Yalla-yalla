@@ -25,10 +25,12 @@ import com.example.ui.theme.ZomatoRed
 import com.example.ui.theme.ZomatoTheme
 import com.example.ui.viewmodel.ArchitectureViewModel
 import com.example.ui.viewmodel.NavigationTab
+import com.example.ui.viewmodel.YallaFirebaseViewModel
 
 class MainActivity : ComponentActivity() {
 
     private val viewModel: ArchitectureViewModel by viewModels()
+    private val firebaseViewModel: YallaFirebaseViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,6 +61,7 @@ class MainActivity : ComponentActivity() {
 
                 val isCustomerTab = uiState.activeTab in listOf(
                     NavigationTab.YALLA_HOME,
+                    NavigationTab.YALLA_FIREBASE,
                     NavigationTab.YALLA_ORDERS,
                     NavigationTab.YALLA_COINS,
                     NavigationTab.YALLA_PROFILE,
@@ -103,8 +106,12 @@ class MainActivity : ComponentActivity() {
                             // Yalla Yalla Customer UI Screens
                             NavigationTab.YALLA_HOME, NavigationTab.ZOMATO_DELIVERY -> YallaHomeScreen(
                                 viewModel = viewModel,
+                                firebaseViewModel = firebaseViewModel,
                                 uiState = uiState,
                                 onViewCartClick = { isCheckoutSheetOpen = true }
+                            )
+                            NavigationTab.YALLA_FIREBASE -> YallaFirebaseScreen(
+                                firebaseViewModel = firebaseViewModel
                             )
                             NavigationTab.YALLA_ORDERS, NavigationTab.ZOMATO_ORDERS -> YallaOrdersScreen(
                                 viewModel = viewModel,

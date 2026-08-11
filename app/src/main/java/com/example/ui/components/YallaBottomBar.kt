@@ -54,6 +54,42 @@ fun YallaBottomBar(
             )
         )
 
+        // Firebase Live
+        NavigationBarItem(
+            selected = selectedTab == NavigationTab.YALLA_FIREBASE,
+            onClick = { onTabSelect(NavigationTab.YALLA_FIREBASE) },
+            icon = {
+                BadgedBox(
+                    badge = {
+                        Badge(containerColor = YallaOrange) {
+                            Text("LIVE", fontSize = 8.sp, color = Color.White, fontWeight = FontWeight.Black)
+                        }
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CloudSync,
+                        contentDescription = "Firebase"
+                    )
+                }
+            },
+            label = {
+                Text(
+                    text = "Firebase",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = if (selectedTab == NavigationTab.YALLA_FIREBASE) FontWeight.Bold else FontWeight.Normal,
+                        fontSize = 11.sp
+                    )
+                )
+            },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = YallaOrange,
+                selectedTextColor = YallaOrange,
+                indicatorColor = YallaOrange.copy(alpha = 0.12f),
+                unselectedIconColor = Color.Gray,
+                unselectedTextColor = Color.Gray
+            )
+        )
+
         // Orders
         NavigationBarItem(
             selected = selectedTab == NavigationTab.YALLA_ORDERS || selectedTab == NavigationTab.ZOMATO_ORDERS,

@@ -34,27 +34,35 @@ class FirebaseRepository {
     private var restaurantListenerRegistration: ListenerRegistration? = null
 
     init {
-        ensureFirebaseAuth()
+        // Initialization without auto GMS anonymous auth broker triggers
     }
 
-    private fun ensureFirebaseAuth() {
+    fun getCurrentUser() = auth?.currentUser
+
+    fun signOut() {
         try {
-            val a = auth ?: return
-            if (a.currentUser == null) {
-                a.signInAnonymously().addOnCompleteListener { task ->
-                    try {
-                        if (task.isSuccessful) {
-                            Log.d("FirebaseRepo", "Anonymous Auth Successful: ${a.currentUser?.uid}")
-                        } else {
-                            Log.w("FirebaseRepo", "Anonymous Auth Failed", task.exception)
-                        }
-                    } catch (t: Throwable) {
-                        Log.w("FirebaseRepo", "Auth complete listener caught exception: ${t.message}")
-                    }
-                }
-            }
-        } catch (e: Throwable) {
-            Log.e("FirebaseRepo", "Firebase Auth initialization skipped or failed: ${e.message}")
+            auth?.signOut()
+        } catch (e: Exception) {
+            Log.e("FirebaseRepo", "Error signing out: ${e.message}")
+        }
+    }
+
+    suspend fun saveUserProfile(uid: String, phoneNumber: String, role: String = "CUSTOMER"): Boolean {
+        val db = firestore ?: return false
+        return try {
+            val userMap = hashMapOf(
+                "uid" to uid,
+                "phoneNumber" to phoneNumber,
+                "role" to role,
+                "createdAt" to com.google.firebase.Timestamp.now(),
+                "updatedAt" to com.google.firebase.Timestamp.now()
+            )
+            db.collection("users").document(uid).set(userMap, com.google.firebase.firestore.SetOptions.merge()).await()
+            Log.d("FirestoreDebug", "Successfully saved user profile to /users/$uid with role $role")
+            true
+        } catch (e: Exception) {
+            Log.e("FirestoreDebug", "Failed to save user profile to /users/$uid: ${e.message}", e)
+            false
         }
     }
 
@@ -65,35 +73,79 @@ class FirebaseRepository {
         try {
             val db = firestore
             if (db == null) {
-                trySend(getFallbackSamplePromotions())
+                Log.e("FirestoreDebug", "Firestore instance is null in getRealtimePromotions")
+                trySend(emptyList())
                 awaitClose { }
                 return@callbackFlow
             }
-            val query = db.collection("promotions").whereEqualTo("isActive", true)
+            val query = db.collection("promotions")
             val listener = query.addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e("FirebaseRepo", "Firestore promotions listener error: ${error.message}")
-                    trySend(getFallbackSamplePromotions())
+                    Log.e("FirestoreDebug", "Firestore promotions listener error: ${error.message}", error)
+                    trySend(emptyList())
                     return@addSnapshotListener
                 }
 
+                val docCount = snapshot?.documents?.size ?: 0
+                Log.d("FirestoreDebug", "Fetched $docCount promotions")
+
                 if (snapshot != null && !snapshot.isEmpty) {
                     val promos = snapshot.documents.mapNotNull { doc ->
-                        doc.toObject(FirestorePromotionItem::class.java)?.apply {
-                            if (id.isEmpty()) id = doc.id
+                        try {
+                            var item = doc.toObject(FirestorePromotionItem::class.java)
+                            val data = doc.data
+                            if (item == null || data != null) {
+                                val titleVal = (doc.getString("title") ?: doc.getString("name") ?: item?.title ?: "").ifBlank { "Special Offer" }
+                                val subVal = (doc.getString("subtitle") ?: item?.subtitle ?: "")
+                                val codeVal = (doc.getString("code") ?: item?.code ?: "YALLA")
+                                val discPercentVal = (doc.get("discountPercent") as? Number)?.toInt() ?: item?.discountPercent ?: 0
+                                val discAmountVal = (doc.get("discountAmount") as? Number)?.toDouble() ?: item?.discountAmount ?: 0.0
+                                val bannerVal = (doc.getString("bannerUrl") ?: doc.getString("image") ?: item?.bannerUrl ?: "")
+                                val activeVal = (doc.getBoolean("isActive") ?: doc.getBoolean("is_active") ?: item?.isActive ?: true)
+
+                                item = FirestorePromotionItem(
+                                    id = doc.id,
+                                    title = titleVal,
+                                    subtitle = subVal,
+                                    code = codeVal,
+                                    discountPercent = discPercentVal,
+                                    discountAmount = discAmountVal,
+                                    bannerUrl = bannerVal,
+                                    isActive = activeVal
+                                )
+                            } else {
+                                item.apply {
+                                    if (id.isEmpty()) id = doc.id
+                                }
+                            }
+                            item
+                        } catch (e: Exception) {
+                            Log.e("FirestoreDebug", "Error parsing promo ${doc.id}: ${e.message}")
+                            val data = doc.data
+                            if (data != null) {
+                                FirestorePromotionItem(
+                                    id = doc.id,
+                                    title = (data["title"] as? String) ?: "Special Offer",
+                                    subtitle = (data["subtitle"] as? String) ?: "",
+                                    code = (data["code"] as? String) ?: "YALLA",
+                                    discountPercent = (data["discountPercent"] as? Number)?.toInt() ?: 0,
+                                    discountAmount = (data["discountAmount"] as? Number)?.toDouble() ?: 0.0,
+                                    bannerUrl = (data["bannerUrl"] as? String) ?: "",
+                                    isActive = (data["isActive"] as? Boolean) ?: true
+                                )
+                            } else null
                         }
                     }
                     trySend(promos)
                 } else {
-                    seedSamplePromotionsToFirestore()
-                    trySend(getFallbackSamplePromotions())
+                    trySend(emptyList())
                 }
             }
             promoListenerRegistration = listener
             awaitClose { listener.remove() }
         } catch (e: Exception) {
-            Log.e("FirebaseRepo", "Exception in getRealtimePromotions: ${e.message}")
-            trySend(getFallbackSamplePromotions())
+            Log.e("FirestoreDebug", "Exception in getRealtimePromotions: ${e.message}")
+            trySend(emptyList())
             awaitClose { }
         }
     }
@@ -105,102 +157,246 @@ class FirebaseRepository {
         try {
             val db = firestore
             if (db == null) {
-                trySend(getFallbackSampleRestaurants())
+                Log.e("FirestoreDebug", "Firestore instance is null in getRealtimeRestaurants")
+                trySend(emptyList())
                 awaitClose { }
                 return@callbackFlow
             }
             val query = db.collection("restaurants")
             val listener = query.addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e("FirebaseRepo", "Firestore restaurants listener error: ${error.message}")
-                    trySend(getFallbackSampleRestaurants())
+                    Log.e("FirestoreDebug", "Firestore restaurants listener error: ${error.message}", error)
+                    trySend(emptyList())
                     return@addSnapshotListener
                 }
 
+                val docCount = snapshot?.documents?.size ?: 0
+                Log.d("FirestoreDebug", "Fetched $docCount restaurants")
+
                 if (snapshot != null && !snapshot.isEmpty) {
                     val rests = snapshot.documents.mapNotNull { doc ->
-                        doc.toObject(FirestoreRestaurantItem::class.java)?.apply {
-                            if (id.isEmpty()) id = doc.id
+                        try {
+                            var item = doc.toObject(FirestoreRestaurantItem::class.java)
+                            val data = doc.data
+                            if (item == null || data != null) {
+                                val nameVal = (doc.getString("name") 
+                                    ?: doc.getString("title") 
+                                    ?: doc.getString("restaurantName") 
+                                    ?: item?.name ?: "").ifBlank { "Restaurant ${doc.id}" }
+                                val cuisineVal = (doc.getString("cuisine") 
+                                    ?: doc.getString("category") 
+                                    ?: item?.cuisine ?: "Multi-Cuisine")
+                                val ratingVal = (doc.get("rating") as? Number)?.toDouble() ?: item?.rating ?: 4.5
+                                val deliveryVal = (doc.get("deliveryTimeMins") as? Number)?.toInt() 
+                                    ?: (doc.get("delivery_time") as? Number)?.toInt() 
+                                    ?: (doc.get("deliveryTime") as? Number)?.toInt() 
+                                    ?: item?.deliveryTimeMins ?: 25
+                                val priceVal = (doc.get("priceForTwo") as? Number)?.toDouble() 
+                                    ?: (doc.get("price_for_two") as? Number)?.toDouble() 
+                                    ?: (doc.get("price") as? Number)?.toDouble() 
+                                    ?: item?.priceForTwo ?: 300.0
+                                val addressVal = (doc.getString("address") ?: doc.getString("location") ?: item?.address ?: "")
+                                val imageVal = (doc.getString("imageUrl") ?: doc.getString("image") ?: doc.getString("bannerUrl") ?: item?.imageUrl ?: "")
+                                val isPromotedVal = (doc.getBoolean("isPromoted") ?: doc.getBoolean("is_promoted") ?: item?.isPromoted ?: false)
+                                val isOpenVal = (doc.getBoolean("isOpen") ?: doc.getBoolean("is_open") ?: doc.getBoolean("isActive") ?: doc.getBoolean("is_active") ?: item?.isOpen ?: true)
+
+                                item = FirestoreRestaurantItem(
+                                    id = doc.id,
+                                    name = nameVal,
+                                    cuisine = cuisineVal,
+                                    rating = ratingVal,
+                                    deliveryTimeMins = deliveryVal,
+                                    priceForTwo = priceVal,
+                                    address = addressVal,
+                                    imageUrl = imageVal,
+                                    isPromoted = isPromotedVal,
+                                    isOpen = isOpenVal
+                                )
+                            } else {
+                                item.apply {
+                                    if (id.isEmpty()) id = doc.id
+                                }
+                            }
+                            Log.d("FirestoreDebug", "Parsed restaurant: ${item.id} -> ${item.name}")
+                            item
+                        } catch (e: Exception) {
+                            Log.e("FirestoreDebug", "Failed to deserialize restaurant doc ${doc.id}: ${e.message}", e)
+                            val data = doc.data
+                            if (data != null) {
+                                FirestoreRestaurantItem(
+                                    id = doc.id,
+                                    name = (data["name"] as? String) ?: (data["title"] as? String) ?: "Restaurant ${doc.id}",
+                                    cuisine = (data["cuisine"] as? String) ?: "Multi-Cuisine",
+                                    rating = (data["rating"] as? Number)?.toDouble() ?: 4.5,
+                                    deliveryTimeMins = (data["deliveryTimeMins"] as? Number)?.toInt() ?: 25,
+                                    priceForTwo = (data["priceForTwo"] as? Number)?.toDouble() ?: 300.0,
+                                    address = (data["address"] as? String) ?: "",
+                                    imageUrl = (data["imageUrl"] as? String) ?: (data["image"] as? String) ?: "",
+                                    isPromoted = (data["isPromoted"] as? Boolean) ?: false,
+                                    isOpen = (data["isOpen"] as? Boolean) ?: true
+                                )
+                            } else null
                         }
                     }
+                    Log.d("FirestoreDebug", "Successfully mapped ${rests.size} valid restaurants out of $docCount documents")
                     trySend(rests)
                 } else {
-                    seedSampleRestaurantsToFirestore()
-                    trySend(getFallbackSampleRestaurants())
+                    Log.d("FirestoreDebug", "Snapshot is null or empty for /restaurants")
+                    trySend(emptyList())
                 }
             }
             restaurantListenerRegistration = listener
             awaitClose { listener.remove() }
         } catch (e: Exception) {
-            Log.e("FirebaseRepo", "Exception in getRealtimeRestaurants: ${e.message}")
-            trySend(getFallbackSampleRestaurants())
+            Log.e("FirestoreDebug", "Exception in getRealtimeRestaurants: ${e.message}", e)
+            trySend(emptyList())
             awaitClose { }
+        }
+    }
+
+    private fun parseDoubleGracefully(value: Any?, defaultValue: Double = 0.0): Double {
+        if (value == null) return defaultValue
+        return when (value) {
+            is Number -> value.toDouble()
+            is String -> {
+                if (value.isBlank()) return defaultValue
+                val clean = value.replace(",", "").replace("[^0-9.]".toRegex(), "")
+                clean.toDoubleOrNull() ?: defaultValue
+            }
+            else -> defaultValue
+        }
+    }
+
+    private fun parseInStockGracefully(value: Any?): Boolean {
+        // Do NOT filter out items if inStock is missing or null.
+        // Treat inStock == true or missing/null as valid available items.
+        if (value == null) return true
+        return when (value) {
+            is Boolean -> value
+            is String -> value.isBlank() || value.equals("true", ignoreCase = true) || value.equals("1", ignoreCase = true) || value.equals("yes", ignoreCase = true)
+            is Number -> value.toInt() != 0
+            else -> true
+        }
+    }
+
+    private fun parseBooleanGracefully(value: Any?, defaultVal: Boolean = true): Boolean {
+        if (value == null) return defaultVal
+        return when (value) {
+            is Boolean -> value
+            is String -> if (value.isBlank()) defaultVal else value.equals("true", ignoreCase = true) || value.equals("1", ignoreCase = true) || value.equals("yes", ignoreCase = true)
+            is Number -> value.toInt() != 0
+            else -> defaultVal
         }
     }
 
     /**
      * Real-Time Firestore Menu Flow
-     * Listens to `/restaurants/{restaurantId}/menu` where `inStock == true`
+     * Listens to `/restaurants/{restaurantId}/menu` with active addSnapshotListener
      */
     fun getRealtimeMenu(restaurantId: String = "rest_yalla_1"): Flow<List<FirestoreDishItem>> = callbackFlow {
         try {
             val db = firestore
             if (db == null) {
-                trySend(getFallbackSampleMenu())
+                Log.e("FirestoreDebug", "Firestore instance is null in getRealtimeMenu")
+                trySend(emptyList())
                 awaitClose { }
                 return@callbackFlow
             }
+            val targetRestId = if (restaurantId.isBlank()) "rest_yalla_1" else restaurantId
             val query = db.collection("restaurants")
-                .document(restaurantId)
+                .document(targetRestId)
                 .collection("menu")
-                .whereEqualTo("inStock", true)
+
+            Log.d("FirestoreDebug", "Subscribing addSnapshotListener to /restaurants/$targetRestId/menu")
 
             val listener = query.addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e("FirebaseRepo", "Firestore menu listener error: ${error.message}")
-                    // Emit sample fallback items if Firestore query fails
-                    trySend(getFallbackSampleMenu())
+                    Log.e("FirestoreDebug", "Firestore menu listener error for $targetRestId: ${error.message}", error)
+                    trySend(emptyList())
                     return@addSnapshotListener
                 }
 
+                val docCount = snapshot?.documents?.size ?: 0
+                Log.d("FirestoreDebug", "Realtime update: Fetched $docCount menu items for restaurant $targetRestId")
+
                 if (snapshot != null && !snapshot.isEmpty) {
                     val dishes = snapshot.documents.mapNotNull { doc ->
-                        doc.toObject(FirestoreDishItem::class.java)?.apply {
-                            if (id.isEmpty()) id = doc.id
+                        try {
+                            val data = doc.data
+                            val nameVal = (doc.getString("name") 
+                                ?: doc.getString("title") 
+                                ?: doc.getString("dishName") 
+                                ?: (data?.get("name") as? String) 
+                                ?: "").ifBlank { "Dish ${doc.id}" }
+
+                            val categoryVal = (doc.getString("category") 
+                                ?: doc.getString("cuisine") 
+                                ?: (data?.get("category") as? String) 
+                                ?: "Popular").ifBlank { "Popular" }
+
+                            // Gracefully parse price whether it comes as Int, Double, Long, or String
+                            val rawPrice = doc.get("price") ?: doc.get("amount") ?: doc.get("cost") ?: doc.get("rate")
+                            val priceVal = parseDoubleGracefully(rawPrice, 0.0)
+
+                            val isVegVal = parseBooleanGracefully(
+                                doc.get("isVeg") ?: doc.get("is_veg") ?: doc.get("veg"),
+                                defaultVal = true
+                            )
+
+                            // Do NOT filter out items if inStock is missing or null.
+                            // Treat inStock == true or missing/null as valid available items.
+                            val inStockVal = parseInStockGracefully(
+                                doc.get("inStock") ?: doc.get("in_stock") ?: doc.get("isAvailable") ?: doc.get("is_available")
+                            )
+
+                            val imageVal = (doc.getString("imageUrl") 
+                                ?: doc.getString("image") 
+                                ?: doc.getString("bannerUrl") 
+                                ?: (data?.get("imageUrl") as? String) 
+                                ?: "")
+
+                            val descVal = (doc.getString("description") 
+                                ?: (data?.get("description") as? String) 
+                                ?: "")
+
+                            val rawRating = doc.get("rating")
+                            val ratingVal = parseDoubleGracefully(rawRating, 4.8)
+
+                            FirestoreDishItem(
+                                id = doc.id,
+                                restaurantId = targetRestId,
+                                name = nameVal,
+                                category = categoryVal,
+                                price = priceVal,
+                                isVeg = isVegVal,
+                                inStock = inStockVal,
+                                imageUrl = imageVal,
+                                description = descVal,
+                                rating = ratingVal
+                            )
+                        } catch (e: Exception) {
+                            Log.e("FirestoreDebug", "Error parsing menu item doc ${doc.id}: ${e.message}", e)
+                            null
                         }
                     }
+                    Log.d("FirestoreDebug", "Emitting ${dishes.size} menu items for restaurant $targetRestId")
                     trySend(dishes)
                 } else {
-                    // Seed initial sample data to Firestore if empty, then emit fallback
-                    seedSampleMenuToFirestore(restaurantId)
-                    trySend(getFallbackSampleMenu())
+                    Log.d("FirestoreDebug", "Snapshot is empty for /restaurants/$targetRestId/menu")
+                    trySend(emptyList())
                 }
             }
 
             menuListenerRegistration = listener
 
             awaitClose {
+                Log.d("FirestoreDebug", "Closing snapshot listener for /restaurants/$targetRestId/menu")
                 listener.remove()
             }
         } catch (e: Exception) {
-            Log.e("FirebaseRepo", "Exception in getRealtimeMenu: ${e.message}")
-            trySend(getFallbackSampleMenu())
+            Log.e("FirestoreDebug", "Exception in getRealtimeMenu: ${e.message}", e)
+            trySend(emptyList())
             awaitClose { }
-        }
-    }
-
-    /**
-     * Seed initial menu to Firestore if empty
-     */
-    fun seedSampleMenuToFirestore(restaurantId: String = "rest_yalla_1") {
-        try {
-            val db = firestore ?: return
-            val menuRef = db.collection("restaurants").document(restaurantId).collection("menu")
-            getFallbackSampleMenu().forEach { item ->
-                menuRef.document(item.id).set(item)
-            }
-        } catch (e: Exception) {
-            Log.w("FirebaseRepo", "Could not seed menu to Firestore: ${e.message}")
         }
     }
 
@@ -289,190 +485,6 @@ class FirebaseRepository {
         }
     }
 
-    /**
-     * Fallback menu data for offline or non-initialized Firestore state
-     */
-    fun getFallbackSampleMenu(): List<FirestoreDishItem> {
-        return listOf(
-            FirestoreDishItem(
-                id = "item_yalla_01",
-                name = "Yalla Special Hyderabadi Biryani",
-                category = "Biryani",
-                price = 340.0,
-                isVeg = false,
-                inStock = true,
-                imageUrl = "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=500",
-                description = "Fragrant basmati rice layered with juicy marinated chicken, saffronic herbs and fried onions.",
-                rating = 4.9
-            ),
-            FirestoreDishItem(
-                id = "item_yalla_02",
-                name = "Paneer Dum Biryani",
-                category = "Biryani",
-                price = 290.0,
-                isVeg = true,
-                inStock = true,
-                imageUrl = "https://images.unsplash.com/photo-1633945274405-b6c8069047b0?w=500",
-                description = "Soft marinated cottage cheese blocks simmered in rich spices and dum rice.",
-                rating = 4.7
-            ),
-            FirestoreDishItem(
-                id = "item_yalla_03",
-                name = "Yalla Loaded Cheese Pizza",
-                category = "Pizza",
-                price = 390.0,
-                isVeg = true,
-                inStock = true,
-                imageUrl = "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=500",
-                description = "10-inch hand-tossed sourdough pizza loaded with mozzarella, jalapenos, and bell peppers.",
-                rating = 4.8
-            ),
-            FirestoreDishItem(
-                id = "item_yalla_04",
-                name = "Smokey Lamb Smash Burger",
-                category = "Burger",
-                price = 320.0,
-                isVeg = false,
-                inStock = true,
-                imageUrl = "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=500",
-                description = "Double smashed lamb patty with melted cheddar, gherkins and secret house sauce.",
-                rating = 4.9
-            ),
-            FirestoreDishItem(
-                id = "item_yalla_05",
-                name = "Butter Chicken Tender Bowl",
-                category = "North Indian",
-                price = 360.0,
-                isVeg = false,
-                inStock = true,
-                imageUrl = "https://images.unsplash.com/photo-1588166524941-3bf61a9c41db?w=500",
-                description = "Creamy tomato silk gravy served with boneless chicken tenders and garlic butter naan.",
-                rating = 4.8
-            ),
-            FirestoreDishItem(
-                id = "item_yalla_06",
-                name = "Avocado Quinoa Power Salad",
-                category = "Healthy",
-                price = 280.0,
-                isVeg = true,
-                inStock = true,
-                imageUrl = "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=500",
-                description = "Fresh avocado, roasted chickpeas, organic quinoa and lemon mustard dressing.",
-                rating = 4.6
-            )
-        )
-    }
 
-    fun seedSamplePromotionsToFirestore() {
-        try {
-            val db = firestore ?: return
-            val ref = db.collection("promotions")
-            getFallbackSamplePromotions().forEach { promo ->
-                ref.document(promo.id).set(promo)
-            }
-        } catch (e: Exception) {
-            Log.w("FirebaseRepo", "Could not seed promotions: ${e.message}")
-        }
-    }
-
-    fun seedSampleRestaurantsToFirestore() {
-        try {
-            val db = firestore ?: return
-            val ref = db.collection("restaurants")
-            getFallbackSampleRestaurants().forEach { rest ->
-                ref.document(rest.id).set(rest)
-            }
-        } catch (e: Exception) {
-            Log.w("FirebaseRepo", "Could not seed restaurants: ${e.message}")
-        }
-    }
-
-    fun getFallbackSamplePromotions(): List<FirestorePromotionItem> {
-        return listOf(
-            FirestorePromotionItem(
-                id = "promo_1",
-                title = "FLAT ₹120 OFF",
-                subtitle = "On orders above ₹399 • Code YALLA120",
-                code = "YALLA120",
-                discountPercent = 0,
-                discountAmount = 120.0,
-                bannerUrl = "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=600",
-                isActive = true
-            ),
-            FirestorePromotionItem(
-                id = "promo_2",
-                title = "50% CRAZY DISCOUNT",
-                subtitle = "Max ₹150 OFF on Biryani • Code BIRYANI50",
-                code = "BIRYANI50",
-                discountPercent = 50,
-                discountAmount = 150.0,
-                bannerUrl = "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=600",
-                isActive = true
-            ),
-            FirestorePromotionItem(
-                id = "promo_3",
-                title = "FREE DELIVERY",
-                subtitle = "On all Yalla Prime Kitchen orders",
-                code = "YALLAFREE",
-                discountPercent = 0,
-                discountAmount = 30.0,
-                bannerUrl = "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=600",
-                isActive = true
-            )
-        )
-    }
-
-    fun getFallbackSampleRestaurants(): List<FirestoreRestaurantItem> {
-        return listOf(
-            FirestoreRestaurantItem(
-                id = "rest_yalla_1",
-                name = "Yalla Yalla Central Kitchen",
-                cuisine = "Hyderabadi Biryani, Kebabs, North Indian",
-                rating = 4.9,
-                deliveryTimeMins = 22,
-                priceForTwo = 350.0,
-                address = "7th Block, Koramangala, Bengaluru",
-                imageUrl = "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=500",
-                isPromoted = true,
-                isOpen = true
-            ),
-            FirestoreRestaurantItem(
-                id = "rest_yalla_2",
-                name = "Biryani Blues Express",
-                cuisine = "Authentic Dum Biryani, Mughlai",
-                rating = 4.8,
-                deliveryTimeMins = 25,
-                priceForTwo = 400.0,
-                address = "Indiranagar 100ft Road, Bengaluru",
-                imageUrl = "https://images.unsplash.com/photo-1633945274405-b6c8069047b0?w=500",
-                isPromoted = true,
-                isOpen = true
-            ),
-            FirestoreRestaurantItem(
-                id = "rest_yalla_3",
-                name = "Sourdough Pizza Co.",
-                cuisine = "Gourmet Woodfired Pizzas, Pasta",
-                rating = 4.7,
-                deliveryTimeMins = 30,
-                priceForTwo = 500.0,
-                address = "HSR Layout Sector 3, Bengaluru",
-                imageUrl = "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=500",
-                isPromoted = false,
-                isOpen = true
-            ),
-            FirestoreRestaurantItem(
-                id = "rest_yalla_4",
-                name = "Smash Burger Club",
-                cuisine = "American Artisanal Burgers, Shakes",
-                rating = 4.8,
-                deliveryTimeMins = 20,
-                priceForTwo = 350.0,
-                address = "Koramangala 4th Block, Bengaluru",
-                imageUrl = "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=500",
-                isPromoted = false,
-                isOpen = true
-            )
-        )
-    }
 }
 

@@ -1,11 +1,21 @@
 package com.example.ui.viewmodel
 
+import android.app.Activity
 import android.app.Application
+import android.content.Context
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.firebase.*
+import com.example.data.location.LocationHelper
+import com.google.firebase.FirebaseException
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.PhoneAuthCredential
+import com.google.firebase.auth.PhoneAuthOptions
+import com.google.firebase.auth.PhoneAuthProvider
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.concurrent.TimeUnit
 
 data class FirebaseUiState(
     val promotions: List<FirestorePromotionItem> = emptyList(),
@@ -15,7 +25,38 @@ data class FirebaseUiState(
     val filteredMenuItems: List<FirestoreDishItem> = emptyList(),
     val selectedCategory: String = "All",
     val searchQuery: String = "",
-    val deliveryLocation: String = "7th Block, Koramangala, Bengaluru (Live GPS)",
+
+    // Location State
+    val deliveryLocation: String = "📍 Indiranagar 100ft Rd, Bengaluru",
+    val currentArea: String = "Indiranagar 100ft Rd",
+    val currentCity: String = "Bengaluru",
+    val currentPincode: String = "560038",
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val isFetchingLocation: Boolean = false,
+    val savedAddresses: List<String> = listOf(
+        "Indiranagar 100ft Rd, Bengaluru",
+        "7th Block, Koramangala, Bengaluru",
+        "MG Road, Shanthala Nagar, Bengaluru",
+        "HSR Layout Sector 1, Bengaluru"
+    ),
+    val isLocationPickerOpen: Boolean = false,
+
+    // Auth State
+    val isUserLoggedIn: Boolean = false,
+    val userPhone: String = "",
+    val userUid: String = "",
+    val userRole: String = "CUSTOMER", // CUSTOMER or RESTAURANT_OWNER
+    val selectedUserRole: String = "CUSTOMER",
+    val inputPhoneNumber: String = "",
+    val formattedPhoneNumber: String = "",
+    val otpVerificationId: String? = null,
+    val resendToken: PhoneAuthProvider.ForceResendingToken? = null,
+    val isSendingOtp: Boolean = false,
+    val isVerifyingOtp: Boolean = false,
+    val otpSent: Boolean = false,
+    val authError: String? = null,
+
     val selectedRestaurant: FirestoreRestaurantItem? = null,
     val isViewingRestaurantMenu: Boolean = false,
     val cart: List<FirestoreCartItem> = emptyList(),
@@ -52,7 +93,257 @@ class YallaFirebaseViewModel(application: Application) : AndroidViewModel(applic
     val uiState: StateFlow<FirebaseUiState> = _uiState.asStateFlow()
 
     init {
+        checkAuthState()
         initRealtimeFirestoreListeners()
+    }
+
+    /**
+     * Session Persistence Check:
+     * If user is already authenticated via FirebaseAuth, bypass login and navigate to Home Screen
+     */
+    fun checkAuthState() {
+        val user = firebaseRepo.getCurrentUser()
+        if (user != null && !user.isAnonymous) {
+            val phone = user.phoneNumber ?: "+91 9876543210"
+            val uid = user.uid
+            Log.d("AuthDebug", "Existing session found for user UID: $uid, Phone: $phone")
+            _uiState.update {
+                it.copy(
+                    isUserLoggedIn = true,
+                    userUid = uid,
+                    userPhone = phone,
+                    userRole = "CUSTOMER"
+                )
+            }
+        } else {
+            Log.d("AuthDebug", "No authenticated phone user session found. Prompting login or anonymous guest.")
+        }
+    }
+
+    /**
+     * Set User Role (CUSTOMER or RESTAURANT_OWNER)
+     */
+    fun setUserRole(role: String) {
+        _uiState.update { it.copy(selectedUserRole = role) }
+    }
+
+    /**
+     * Step 1: Send OTP via Firebase PhoneAuthProvider
+     */
+    fun sendOtp(phoneNumber: String, activity: Activity, onCodeSentCallback: (() -> Unit)? = null) {
+        if (phoneNumber.length < 10) {
+            _uiState.update { it.copy(authError = "Please enter a valid 10-digit mobile number") }
+            return
+        }
+
+        val formattedNumber = if (phoneNumber.startsWith("+")) phoneNumber else "+91$phoneNumber"
+        _uiState.update {
+            it.copy(
+                isSendingOtp = true,
+                authError = null,
+                inputPhoneNumber = phoneNumber,
+                formattedPhoneNumber = formattedNumber
+            )
+        }
+
+        val options = PhoneAuthOptions.newBuilder(FirebaseAuth.getInstance())
+            .setPhoneNumber(formattedNumber)
+            .setTimeout(60L, TimeUnit.SECONDS)
+            .setActivity(activity)
+            .setCallbacks(object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+                override fun onVerificationCompleted(credential: PhoneAuthCredential) {
+                    Log.d("AuthDebug", "Phone verification completed automatically")
+                    _uiState.update { it.copy(isSendingOtp = false) }
+                    signInWithCredential(credential, onCodeSentCallback)
+                }
+
+                override fun onVerificationFailed(e: FirebaseException) {
+                    Log.e("AuthDebug", "Verification failed: ${e.message}", e)
+                    _uiState.update {
+                        it.copy(
+                            isSendingOtp = false,
+                            authError = "OTP Verification Failed: ${e.message}"
+                        )
+                    }
+                }
+
+                override fun onCodeSent(
+                    verificationId: String,
+                    token: PhoneAuthProvider.ForceResendingToken
+                ) {
+                    Log.d("AuthDebug", "Code sent to $formattedNumber, verificationId: $verificationId")
+                    _uiState.update {
+                        it.copy(
+                            isSendingOtp = false,
+                            otpSent = true,
+                            otpVerificationId = verificationId,
+                            resendToken = token,
+                            authError = null,
+                            statusMessage = "OTP sent to $formattedNumber"
+                        )
+                    }
+                    onCodeSentCallback?.invoke()
+                }
+            })
+            .build()
+
+        PhoneAuthProvider.verifyPhoneNumber(options)
+    }
+
+    /**
+     * Step 2: Verify OTP 6-Digit Code
+     */
+    fun verifyOtp(code: String, onSuccessCallback: (() -> Unit)? = null) {
+        val verificationId = _uiState.value.otpVerificationId
+        if (verificationId == null) {
+            _uiState.update { it.copy(authError = "Verification ID missing. Please request a new OTP.") }
+            return
+        }
+        if (code.length < 6) {
+            _uiState.update { it.copy(authError = "Please enter valid 6-digit OTP code") }
+            return
+        }
+
+        _uiState.update { it.copy(isVerifyingOtp = true, authError = null) }
+        val credential = PhoneAuthProvider.getCredential(verificationId, code)
+        signInWithCredential(credential, onSuccessCallback)
+    }
+
+    private fun signInWithCredential(credential: PhoneAuthCredential, onSuccessCallback: (() -> Unit)? = null) {
+        val auth = FirebaseAuth.getInstance()
+        auth.signInWithCredential(credential)
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    val user = auth.currentUser
+                    val uid = user?.uid ?: "user_${System.currentTimeMillis()}"
+                    val phone = user?.phoneNumber ?: _uiState.value.formattedPhoneNumber
+                    val role = "CUSTOMER"
+
+                    _uiState.update {
+                        it.copy(
+                            isVerifyingOtp = false,
+                            isUserLoggedIn = true,
+                            userUid = uid,
+                            userPhone = phone,
+                            userRole = role,
+                            selectedUserRole = role,
+                            authError = null,
+                            statusMessage = "Logged in successfully as $phone!"
+                        )
+                    }
+
+                    // Save user UID & phone number to `/users/{uid}` in Firestore
+                    viewModelScope.launch {
+                        firebaseRepo.saveUserProfile(uid, phone, "CUSTOMER")
+                    }
+
+                    onSuccessCallback?.invoke()
+                } else {
+                    Log.e("AuthDebug", "Sign in failed: ${task.exception?.message}")
+                    _uiState.update {
+                        it.copy(
+                            isVerifyingOtp = false,
+                            authError = "Invalid OTP code or auth failed: ${task.exception?.message}"
+                        )
+                    }
+                }
+            }
+    }
+
+    fun resetOtpState() {
+        _uiState.update {
+            it.copy(
+                otpSent = false,
+                otpVerificationId = null,
+                authError = null,
+                isSendingOtp = false,
+                isVerifyingOtp = false
+            )
+        }
+    }
+
+    fun bypassLoginForDemo() {
+        val demoUid = "demo_guest_${System.currentTimeMillis().toString().takeLast(4)}"
+        val demoPhone = "+91 9876543210"
+        _uiState.update {
+            it.copy(
+                isUserLoggedIn = true,
+                userUid = demoUid,
+                userPhone = demoPhone,
+                userRole = "CUSTOMER",
+                statusMessage = "Logged in as Guest Demo user"
+            )
+        }
+        viewModelScope.launch {
+            firebaseRepo.saveUserProfile(demoUid, demoPhone, "CUSTOMER")
+        }
+    }
+
+    fun signOut() {
+        firebaseRepo.signOut()
+        _uiState.update {
+            it.copy(
+                isUserLoggedIn = false,
+                userUid = "",
+                userPhone = "",
+                otpSent = false,
+                otpVerificationId = null,
+                inputPhoneNumber = "",
+                formattedPhoneNumber = "",
+                statusMessage = "Signed out"
+            )
+        }
+    }
+
+    /**
+     * Zomato-Style Live GPS Location Fetching
+     */
+    fun fetchLiveLocation(context: Context) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isFetchingLocation = true) }
+            val locationHelper = LocationHelper(context)
+            val loc = locationHelper.getCurrentLocation()
+            if (loc != null) {
+                _uiState.update {
+                    it.copy(
+                        deliveryLocation = loc.fullAddress,
+                        currentArea = loc.area,
+                        currentCity = loc.city,
+                        currentPincode = loc.pincode,
+                        latitude = loc.latitude,
+                        longitude = loc.longitude,
+                        isFetchingLocation = false,
+                        statusMessage = "Updated Location: ${loc.area}"
+                    )
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        deliveryLocation = "📍 Koramangala 7th Block, Bengaluru - 560034",
+                        currentArea = "Koramangala 7th Block",
+                        currentCity = "Bengaluru",
+                        currentPincode = "560034",
+                        isFetchingLocation = false,
+                        statusMessage = "Using Default Location: Koramangala"
+                    )
+                }
+            }
+        }
+    }
+
+    fun selectAddress(address: String) {
+        val formattedAddress = if (address.startsWith("📍")) address else "📍 $address"
+        _uiState.update {
+            it.copy(
+                deliveryLocation = formattedAddress,
+                isLocationPickerOpen = false,
+                statusMessage = "Selected Address: $address"
+            )
+        }
+    }
+
+    fun toggleLocationPicker(open: Boolean) {
+        _uiState.update { it.copy(isLocationPickerOpen = open) }
     }
 
     private fun initRealtimeFirestoreListeners() {
@@ -67,8 +358,7 @@ class YallaFirebaseViewModel(application: Application) : AndroidViewModel(applic
                     }
                     .collect { promos ->
                         _uiState.update { state ->
-                            val updated = if (promos.isEmpty()) firebaseRepo.getFallbackSamplePromotions() else promos
-                            state.copy(promotions = updated)
+                            state.copy(promotions = promos)
                         }
                     }
             }
@@ -77,16 +367,35 @@ class YallaFirebaseViewModel(application: Application) : AndroidViewModel(applic
             launch {
                 firebaseRepo.getRealtimeRestaurants()
                     .catch { e ->
-                        _uiState.update { it.copy(errorMessage = "Restaurants error: ${e.message}") }
+                        android.util.Log.e("FirestoreDebug", "ViewModel caught restaurants error: ${e.message}")
+                        _uiState.update { it.copy(errorMessage = "Restaurants error: ${e.message}", isLoading = false) }
                     }
                     .collect { rests ->
+                        android.util.Log.d("FirestoreDebug", "ViewModel received ${rests.size} restaurants")
                         _uiState.update { state ->
-                            val updatedRests = if (rests.isEmpty()) firebaseRepo.getFallbackSampleRestaurants() else rests
+                            val updatedSelectedRest = state.selectedRestaurant ?: rests.firstOrNull()
                             state.copy(
-                                restaurants = updatedRests,
-                                filteredRestaurants = filterRestaurants(updatedRests, state.selectedCategory, state.searchQuery),
+                                restaurants = rests,
+                                filteredRestaurants = filterRestaurants(rests, state.selectedCategory, state.searchQuery),
+                                selectedRestaurant = updatedSelectedRest,
                                 isLoading = false
                             )
+                        }
+                        if (rests.isNotEmpty() && _uiState.value.menuItems.isEmpty()) {
+                            val firstRestId = rests.first().id
+                            android.util.Log.d("FirestoreDebug", "Triggering realtime menu for first restaurant: $firstRestId")
+                            launch {
+                                firebaseRepo.getRealtimeMenu(firstRestId)
+                                    .catch { e -> android.util.Log.e("FirestoreDebug", "Menu error for $firstRestId: ${e.message}") }
+                                    .collect { dishes ->
+                                        _uiState.update { state ->
+                                            state.copy(
+                                                menuItems = dishes,
+                                                filteredMenuItems = filterDishes(dishes, state.selectedCategory, state.searchQuery)
+                                            )
+                                        }
+                                    }
+                            }
                         }
                     }
             }
@@ -99,10 +408,9 @@ class YallaFirebaseViewModel(application: Application) : AndroidViewModel(applic
                     }
                     .collect { dishes ->
                         _uiState.update { state ->
-                            val updatedDishes = if (dishes.isEmpty()) firebaseRepo.getFallbackSampleMenu() else dishes
                             state.copy(
-                                menuItems = updatedDishes,
-                                filteredMenuItems = filterDishes(updatedDishes, state.selectedCategory, state.searchQuery)
+                                menuItems = dishes,
+                                filteredMenuItems = filterDishes(dishes, state.selectedCategory, state.searchQuery)
                             )
                         }
                     }
@@ -181,6 +489,20 @@ class YallaFirebaseViewModel(application: Application) : AndroidViewModel(applic
 
     fun openRestaurantMenu(restaurant: FirestoreRestaurantItem) {
         _uiState.update { it.copy(selectedRestaurant = restaurant, isViewingRestaurantMenu = true) }
+        viewModelScope.launch {
+            firebaseRepo.getRealtimeMenu(restaurant.id)
+                .catch { e ->
+                    _uiState.update { it.copy(errorMessage = "Menu error: ${e.message}") }
+                }
+                .collect { dishes ->
+                    _uiState.update { state ->
+                        state.copy(
+                            menuItems = dishes,
+                            filteredMenuItems = filterDishes(dishes, state.selectedCategory, state.searchQuery)
+                        )
+                    }
+                }
+        }
     }
 
     fun closeRestaurantMenu() {
@@ -321,13 +643,9 @@ class YallaFirebaseViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    fun seedFirestoreData() {
-        viewModelScope.launch {
-            firebaseRepo.seedSampleMenuToFirestore("rest_yalla_1")
-            firebaseRepo.seedSamplePromotionsToFirestore()
-            firebaseRepo.seedSampleRestaurantsToFirestore()
-            _uiState.update { it.copy(statusMessage = "All sample collections seeded to Firestore!") }
-        }
+    fun refreshFirestoreData() {
+        initRealtimeFirestoreListeners()
+        _uiState.update { it.copy(statusMessage = "Refreshed Live Firestore Streams") }
     }
 
     fun clearMessages() {

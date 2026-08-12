@@ -75,52 +75,14 @@ fun YallaHomeScreen(
             ) {
                 // 1. Dynamic Header with Firestore Address & Live GPS Status
                 item {
-                    Column {
-                        YallaHeader(
-                            appName = "Yalla Yalla",
-                            location = firebaseUiState.deliveryLocation,
-                            yallaCoins = uiState.yallaCoinsBalance,
-                            onLocationClick = { },
-                            onProfileClick = { viewModel.selectTab(NavigationTab.YALLA_PROFILE) },
-                            onCoinsClick = { viewModel.selectTab(NavigationTab.YALLA_COINS) }
-                        )
-
-                        // Realtime Firebase Connection Badge
-                        Surface(
-                            color = Color(0xFFE8F5E9),
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, Color(0xFF81C784))
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text("🟢", fontSize = 10.sp)
-                                    Text(
-                                        text = "LIVE FIRESTORE DATA SYNCED",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Color(0xFF2E7D32),
-                                            fontSize = 10.sp
-                                        )
-                                    )
-                                }
-                                Text(
-                                    text = "${firebaseUiState.restaurants.size} Restaurants • ${firebaseUiState.menuItems.size} Dishes",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = Color(0xFF2E7D32),
-                                        fontSize = 10.sp
-                                    )
-                                )
-                            }
-                        }
-                    }
+                    YallaHeader(
+                        appName = "Yalla Yalla",
+                        location = firebaseUiState.deliveryLocation,
+                        yallaCoins = uiState.yallaCoinsBalance,
+                        onLocationClick = { firebaseViewModel.toggleLocationPicker(true) },
+                        onProfileClick = { viewModel.selectTab(NavigationTab.YALLA_PROFILE) },
+                        onCoinsClick = { viewModel.selectTab(NavigationTab.YALLA_COINS) }
+                    )
                 }
 
                 // 2. Search Bar
@@ -215,65 +177,80 @@ fun YallaHomeScreen(
                     }
                 }
 
-                // 6. Section Header: Yalla Verified Firestore Restaurants
+                // 6. Section Header: Restaurants
                 item {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(horizontal = 16.dp)
                     ) {
-                        Column {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        Text(
+                            text = "RESTAURANTS NEAR YOU",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Black,
+                                color = YallaTextPrimary,
+                                letterSpacing = 0.5.sp
+                            )
+                        )
+                        Text(
+                            text = "Order from top cloud kitchens and local favorites",
+                            style = MaterialTheme.typography.bodySmall.copy(color = YallaTextSecondary)
+                        )
+                    }
+                }
+
+                // 7. Restaurant Cards Feed or Empty State
+                if (firebaseUiState.filteredRestaurants.isEmpty() && !firebaseUiState.isLoading) {
+                    item {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = BorderStroke(1.dp, YallaBorder)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .padding(24.dp)
+                                    .fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(
-                                    text = "YALLA VERIFIED RESTAURANTS",
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        fontWeight = FontWeight.Black,
-                                        color = YallaTextPrimary,
-                                        letterSpacing = 0.5.sp
-                                    )
+                                Icon(
+                                    imageVector = Icons.Default.Storefront,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(36.dp),
+                                    tint = YallaTextSecondary
                                 )
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = YallaGreenLight
-                                ) {
-                                    Text(
-                                        text = "LIVE FIRESTORE",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = YallaGreen,
-                                            fontSize = 9.sp
-                                        ),
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
-                                }
+                                Text(
+                                    text = "No restaurants available right now",
+                                    fontWeight = FontWeight.Bold,
+                                    color = YallaTextPrimary,
+                                    fontSize = 15.sp
+                                )
+                                Text(
+                                    text = "Restaurants added in Firebase Admin Portal will appear here in real time.",
+                                    style = MaterialTheme.typography.bodySmall.copy(color = YallaTextSecondary)
+                                )
                             }
-                            Text(
-                                text = "Real-time menu, rating, and stock data from Firestore",
-                                style = MaterialTheme.typography.bodySmall.copy(color = YallaTextSecondary)
+                        }
+                    }
+                } else {
+                    items(firebaseUiState.filteredRestaurants) { rest ->
+                        Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                            FirestoreRestaurantCard(
+                                restaurant = rest,
+                                onClick = { firebaseViewModel.openRestaurantMenu(rest) }
                             )
                         }
                     }
                 }
 
-                // 7. Restaurant Cards Feed from Firestore
-                items(firebaseUiState.filteredRestaurants) { rest ->
-                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                        FirestoreRestaurantCard(
-                            restaurant = rest,
-                            onClick = { firebaseViewModel.openRestaurantMenu(rest) }
-                        )
-                    }
-                }
-
-                // 8. Dynamic Menu & Dish Feed from Firestore `/restaurants/{id}/menu`
+                // 8. Dynamic Menu & Dish Feed or Empty State
                 item {
                     Text(
-                        text = "POPULAR DISHES (LIVE MENU)",
+                        text = "POPULAR DISHES",
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Black,
                             color = YallaTextSecondary,
@@ -283,26 +260,64 @@ fun YallaHomeScreen(
                     )
                 }
 
-                items(firebaseUiState.filteredMenuItems) { dish ->
-                    val quantity = firebaseUiState.cart.find { it.itemId == dish.id }?.quantity ?: 0
-                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                        FirestoreDishCard(
-                            dish = dish,
-                            quantityInCart = quantity,
-                            onAddClick = { firebaseViewModel.addToCart(dish) },
-                            onRemoveClick = { firebaseViewModel.updateCartQuantity(dish.id, -1) }
-                        )
+                if (firebaseUiState.filteredMenuItems.isEmpty() && !firebaseUiState.isLoading) {
+                    item {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = BorderStroke(1.dp, YallaBorder)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .padding(24.dp)
+                                    .fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.RestaurantMenu,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(36.dp),
+                                    tint = YallaTextSecondary
+                                )
+                                Text(
+                                    text = "No dishes available right now",
+                                    fontWeight = FontWeight.Bold,
+                                    color = YallaTextPrimary,
+                                    fontSize = 15.sp
+                                )
+                                Text(
+                                    text = "Dishes added to Firestore will sync and display here instantly.",
+                                    style = MaterialTheme.typography.bodySmall.copy(color = YallaTextSecondary)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    items(firebaseUiState.filteredMenuItems) { dish ->
+                        val quantity = firebaseUiState.cart.find { it.itemId == dish.id }?.quantity ?: 0
+                        Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                            FirestoreDishCard(
+                                dish = dish,
+                                quantityInCart = quantity,
+                                onAddClick = { firebaseViewModel.addToCart(dish) },
+                                onRemoveClick = { firebaseViewModel.updateCartQuantity(dish.id, -1) }
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // Floating Bottom Cart Bar with exact Firestore cart total
-        if (firebaseUiState.cartTotalCount > 0 && !firebaseUiState.isViewingRestaurantMenu) {
+        // Floating Bottom Cart Bar with exact Firestore cart total cleanly floating above bottom nav bar
+        if (firebaseUiState.cartTotalCount > 0) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 72.dp)
+                    .padding(bottom = 12.dp)
             ) {
                 YallaCartBar(
                     cartItemsCount = firebaseUiState.cartTotalCount,
@@ -310,6 +325,15 @@ fun YallaHomeScreen(
                     onGoToCartClick = onViewCartClick
                 )
             }
+        }
+
+        // Location Picker Bottom Sheet
+        if (firebaseUiState.isLocationPickerOpen) {
+            YallaLocationBottomSheet(
+                firebaseViewModel = firebaseViewModel,
+                uiState = firebaseUiState,
+                onDismiss = { firebaseViewModel.toggleLocationPicker(false) }
+            )
         }
     }
 }
@@ -765,44 +789,6 @@ private fun YallaRestaurantMenuDetailView(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
             )
-        },
-        bottomBar = {
-            if (totalCount > 0) {
-                Surface(
-                    color = YallaOrange,
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    shadowElevation = 8.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = "$totalCount ITEMS • ₹${totalAmount.toInt()}",
-                                style = MaterialTheme.typography.titleSmall.copy(
-                                    color = Color.White,
-                                    fontWeight = FontWeight.ExtraBold
-                                )
-                            )
-                            Text(
-                                text = "Synced directly with Firestore Cart",
-                                style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.9f))
-                            )
-                        }
-
-                        Button(
-                            onClick = onViewCartClick,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.White),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("Go to Cart ➔", color = YallaOrange, fontWeight = FontWeight.ExtraBold)
-                        }
-                    }
-                }
-            }
         }
     ) { innerPadding ->
         LazyColumn(
@@ -811,6 +797,7 @@ private fun YallaRestaurantMenuDetailView(
                 .padding(innerPadding)
                 .background(YallaLightBg)
                 .padding(16.dp),
+            contentPadding = PaddingValues(bottom = 100.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {

@@ -27,6 +27,7 @@ import coil.compose.AsyncImage
 import com.example.data.firebase.FirestoreDishItem
 import com.example.data.firebase.FirestoreOrderItem
 import com.example.ui.components.VegNonVegIcon
+import com.example.ui.components.YallaCartBar
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.YallaFirebaseViewModel
 
@@ -86,14 +87,14 @@ fun YallaFirebaseScreen(
                             }
 
                             Button(
-                                onClick = { firebaseViewModel.seedFirestoreData() },
+                                onClick = { firebaseViewModel.refreshFirestoreData() },
                                 colors = ButtonDefaults.buttonColors(containerColor = YallaYellow),
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                 shape = RoundedCornerShape(8.dp)
                             ) {
                                 Icon(Icons.Default.CloudSync, contentDescription = null, tint = YallaTextPrimary, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Sync Menu", color = YallaTextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("Refresh", color = YallaTextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -211,54 +212,16 @@ fun YallaFirebaseScreen(
 
         // FLOATING CART BAR
         if (firebaseUiState.cartTotalCount > 0) {
-            Surface(
-                color = YallaOrange,
+            Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(16.dp)
-                    .fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                shadowElevation = 10.dp
+                    .padding(bottom = 12.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "${firebaseUiState.cartTotalCount} ITEMS • ₹${firebaseUiState.totalAmount.toInt()}",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                color = Color.White,
-                                fontWeight = FontWeight.Black
-                            )
-                        )
-                        Text(
-                            text = "Direct push to Firestore /orders collection",
-                            style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.9f))
-                        )
-                    }
-
-                    Button(
-                        onClick = { firebaseViewModel.placeOrderToFirestore() },
-                        enabled = !firebaseUiState.isPlacingOrder,
-                        colors = ButtonDefaults.buttonColors(containerColor = YallaYellow),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        if (firebaseUiState.isPlacingOrder) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = YallaTextPrimary, strokeWidth = 2.dp)
-                        } else {
-                            Text(
-                                text = "PLACE FIRESTORE ORDER ➔",
-                                color = YallaTextPrimary,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
-                }
+                YallaCartBar(
+                    cartItemsCount = firebaseUiState.cartTotalCount,
+                    cartTotal = firebaseUiState.totalAmount,
+                    onGoToCartClick = { firebaseViewModel.placeOrderToFirestore() }
+                )
             }
         }
     }

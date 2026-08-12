@@ -22,9 +22,10 @@ fun YallaBottomBar(
     modifier: Modifier = Modifier
 ) {
     NavigationBar(
-        modifier = modifier.height(68.dp),
+        modifier = modifier,
         containerColor = Color.White,
-        tonalElevation = 10.dp
+        tonalElevation = 10.dp,
+        windowInsets = NavigationBarDefaults.windowInsets
     ) {
         // Home
         NavigationBarItem(
@@ -54,29 +55,21 @@ fun YallaBottomBar(
             )
         )
 
-        // Firebase Live
+        // Search
         NavigationBarItem(
-            selected = selectedTab == NavigationTab.YALLA_FIREBASE,
-            onClick = { onTabSelect(NavigationTab.YALLA_FIREBASE) },
+            selected = selectedTab == NavigationTab.YALLA_SEARCH,
+            onClick = { onTabSelect(NavigationTab.YALLA_SEARCH) },
             icon = {
-                BadgedBox(
-                    badge = {
-                        Badge(containerColor = YallaOrange) {
-                            Text("LIVE", fontSize = 8.sp, color = Color.White, fontWeight = FontWeight.Black)
-                        }
-                    }
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CloudSync,
-                        contentDescription = "Firebase"
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Search"
+                )
             },
             label = {
                 Text(
-                    text = "Firebase",
+                    text = "Search",
                     style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = if (selectedTab == NavigationTab.YALLA_FIREBASE) FontWeight.Bold else FontWeight.Normal,
+                        fontWeight = if (selectedTab == NavigationTab.YALLA_SEARCH) FontWeight.Bold else FontWeight.Normal,
                         fontSize = 11.sp
                     )
                 )

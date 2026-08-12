@@ -39,6 +39,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             YallaTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+                val firebaseUiState by firebaseViewModel.uiState.collectAsStateWithLifecycle()
                 val allOrders by viewModel.allOrders.collectAsStateWithLifecycle()
                 val allWebhooks by viewModel.allWebhooks.collectAsStateWithLifecycle()
 
@@ -59,107 +60,127 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                val isCustomerTab = uiState.activeTab in listOf(
-                    NavigationTab.YALLA_HOME,
-                    NavigationTab.YALLA_FIREBASE,
-                    NavigationTab.YALLA_ORDERS,
-                    NavigationTab.YALLA_COINS,
-                    NavigationTab.YALLA_PROFILE,
-                    NavigationTab.ZOMATO_DELIVERY,
-                    NavigationTab.ZOMATO_ORDERS,
-                    NavigationTab.ZOMATO_MONEY,
-                    NavigationTab.ZOMATO_PROFILE
-                )
+                LaunchedEffect(firebaseUiState.statusMessage) {
+                    firebaseUiState.statusMessage?.let {
+                        snackbarHostState.showSnackbar(it)
+                        firebaseViewModel.clearMessages()
+                    }
+                }
 
-                Scaffold(
-                    topBar = {
-                        if (!isCustomerTab) {
-                            DeveloperTopBar(
-                                currentTab = uiState.activeTab,
-                                onReturnToApp = { viewModel.selectTab(NavigationTab.YALLA_HOME) }
-                            )
+                if (!firebaseUiState.isUserLoggedIn) {
+                    YallaLoginScreen(
+                        firebaseViewModel = firebaseViewModel,
+                        uiState = firebaseUiState,
+                        onLoginSuccess = {
+                            viewModel.selectTab(NavigationTab.YALLA_HOME)
                         }
-                    },
-                    bottomBar = {
-                        if (isCustomerTab) {
-                            YallaBottomBar(
-                                selectedTab = uiState.activeTab,
-                                yallaCoinsCount = uiState.yallaCoinsBalance,
-                                onTabSelect = { viewModel.selectTab(it) }
-                            )
-                        } else {
-                            DeveloperBottomBar(
-                                selectedTab = uiState.activeTab,
-                                onTabSelect = { viewModel.selectTab(it) }
-                            )
-                        }
-                    },
-                    snackbarHost = { SnackbarHost(snackbarHostState) },
-                    modifier = Modifier.fillMaxSize()
-                ) { innerPadding ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding)
-                    ) {
-                        when (uiState.activeTab) {
-                            // Yalla Yalla Customer UI Screens
-                            NavigationTab.YALLA_HOME, NavigationTab.ZOMATO_DELIVERY -> YallaHomeScreen(
-                                viewModel = viewModel,
-                                firebaseViewModel = firebaseViewModel,
-                                uiState = uiState,
-                                onViewCartClick = { isCheckoutSheetOpen = true }
-                            )
-                            NavigationTab.YALLA_FIREBASE -> YallaFirebaseScreen(
-                                firebaseViewModel = firebaseViewModel
-                            )
-                            NavigationTab.YALLA_ORDERS, NavigationTab.ZOMATO_ORDERS -> YallaOrdersScreen(
-                                viewModel = viewModel,
-                                uiState = uiState,
-                                allOrders = allOrders
-                            )
-                            NavigationTab.YALLA_COINS, NavigationTab.ZOMATO_MONEY -> YallaCoinsScreen(
-                                viewModel = viewModel,
-                                uiState = uiState
-                            )
-                            NavigationTab.YALLA_PROFILE, NavigationTab.ZOMATO_PROFILE -> YallaProfileScreen(
-                                viewModel = viewModel,
-                                uiState = uiState
-                            )
+                    )
+                } else {
+                    val isCustomerTab = uiState.activeTab in listOf(
+                        NavigationTab.YALLA_HOME,
+                        NavigationTab.YALLA_SEARCH,
+                        NavigationTab.YALLA_FIREBASE,
+                        NavigationTab.YALLA_ORDERS,
+                        NavigationTab.YALLA_COINS,
+                        NavigationTab.YALLA_PROFILE,
+                        NavigationTab.ZOMATO_DELIVERY,
+                        NavigationTab.ZOMATO_ORDERS,
+                        NavigationTab.ZOMATO_MONEY,
+                        NavigationTab.ZOMATO_PROFILE
+                    )
 
-                            // Developer Architecture Specs Screens
-                            NavigationTab.BLUEPRINT -> BlueprintScreen(
-                                viewModel = viewModel,
-                                uiState = uiState
-                            )
-                            NavigationTab.SCHEMA -> SchemaScreen()
-                            NavigationTab.RAZORPAY_SANDBOX -> RazorpaySandboxScreen(
-                                viewModel = viewModel,
-                                uiState = uiState,
-                                allOrders = allOrders,
-                                allWebhooks = allWebhooks
-                            )
-                            NavigationTab.DELIVERY_ENGINE -> DeliveryEngineScreen(
-                                viewModel = viewModel,
-                                uiState = uiState
-                            )
-                            NavigationTab.EDGE_CASES -> EdgeCasesScreen(
-                                viewModel = viewModel,
-                                uiState = uiState
-                            )
-                        }
+                    Scaffold(
+                        topBar = {
+                            if (!isCustomerTab) {
+                                DeveloperTopBar(
+                                    currentTab = uiState.activeTab,
+                                    onReturnToApp = { viewModel.selectTab(NavigationTab.YALLA_HOME) }
+                                )
+                            }
+                        },
+                        bottomBar = {
+                            if (isCustomerTab) {
+                                YallaBottomBar(
+                                    selectedTab = uiState.activeTab,
+                                    yallaCoinsCount = uiState.yallaCoinsBalance,
+                                    onTabSelect = { viewModel.selectTab(it) }
+                                )
+                            } else {
+                                DeveloperBottomBar(
+                                    selectedTab = uiState.activeTab,
+                                    onTabSelect = { viewModel.selectTab(it) }
+                                )
+                            }
+                        },
+                        snackbarHost = { SnackbarHost(snackbarHostState) },
+                        modifier = Modifier.fillMaxSize()
+                    ) { innerPadding ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(innerPadding)
+                        ) {
+                            when (uiState.activeTab) {
+                                // Yalla Yalla Customer UI Screens
+                                NavigationTab.YALLA_HOME, NavigationTab.YALLA_SEARCH, NavigationTab.ZOMATO_DELIVERY -> YallaHomeScreen(
+                                    viewModel = viewModel,
+                                    firebaseViewModel = firebaseViewModel,
+                                    uiState = uiState,
+                                    onViewCartClick = { isCheckoutSheetOpen = true }
+                                )
+                                NavigationTab.YALLA_FIREBASE -> YallaFirebaseScreen(
+                                    firebaseViewModel = firebaseViewModel
+                                )
+                                NavigationTab.YALLA_ORDERS, NavigationTab.ZOMATO_ORDERS -> YallaOrdersScreen(
+                                    viewModel = viewModel,
+                                    uiState = uiState,
+                                    allOrders = allOrders
+                                )
+                                NavigationTab.YALLA_COINS, NavigationTab.ZOMATO_MONEY -> YallaCoinsScreen(
+                                    viewModel = viewModel,
+                                    uiState = uiState
+                                )
+                                NavigationTab.YALLA_PROFILE, NavigationTab.ZOMATO_PROFILE -> YallaProfileScreen(
+                                    viewModel = viewModel,
+                                    firebaseViewModel = firebaseViewModel,
+                                    uiState = uiState
+                                )
 
-                        // Yalla Yalla Cart & Payment Checkout Bottom Sheet
-                        if (isCheckoutSheetOpen) {
-                            YallaCheckoutBottomSheet(
-                                viewModel = viewModel,
-                                uiState = uiState,
-                                onDismiss = { isCheckoutSheetOpen = false },
-                                onOrderPlaced = {
-                                    isCheckoutSheetOpen = false
-                                    viewModel.selectTab(NavigationTab.YALLA_ORDERS)
-                                }
-                            )
+                                // Developer Architecture Specs Screens
+                                NavigationTab.BLUEPRINT -> BlueprintScreen(
+                                    viewModel = viewModel,
+                                    uiState = uiState
+                                )
+                                NavigationTab.SCHEMA -> SchemaScreen()
+                                NavigationTab.RAZORPAY_SANDBOX -> RazorpaySandboxScreen(
+                                    viewModel = viewModel,
+                                    uiState = uiState,
+                                    allOrders = allOrders,
+                                    allWebhooks = allWebhooks
+                                )
+                                NavigationTab.DELIVERY_ENGINE -> DeliveryEngineScreen(
+                                    viewModel = viewModel,
+                                    uiState = uiState
+                                )
+                                NavigationTab.EDGE_CASES -> EdgeCasesScreen(
+                                    viewModel = viewModel,
+                                    uiState = uiState
+                                )
+                            }
+
+                            // Yalla Yalla Cart & Payment Checkout Bottom Sheet
+                            if (isCheckoutSheetOpen) {
+                                YallaCheckoutBottomSheet(
+                                    viewModel = viewModel,
+                                    firebaseViewModel = firebaseViewModel,
+                                    uiState = uiState,
+                                    onDismiss = { isCheckoutSheetOpen = false },
+                                    onOrderPlaced = {
+                                        isCheckoutSheetOpen = false
+                                        viewModel.selectTab(NavigationTab.YALLA_ORDERS)
+                                    }
+                                )
+                            }
                         }
                     }
                 }

@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -19,17 +20,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.ArchitectureViewModel
 import com.example.ui.viewmodel.NavigationTab
 import com.example.ui.viewmodel.UiState
+import com.example.ui.viewmodel.YallaFirebaseViewModel
 
 @Composable
 fun YallaProfileScreen(
     viewModel: ArchitectureViewModel,
+    firebaseViewModel: YallaFirebaseViewModel,
     uiState: UiState,
     modifier: Modifier = Modifier
 ) {
+    val firebaseUiState by firebaseViewModel.uiState.collectAsStateWithLifecycle()
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -38,7 +44,7 @@ fun YallaProfileScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = PaddingValues(bottom = 90.dp)
     ) {
-        // Profile Header Card
+        // Profile Header Card with Live Auth Info
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -63,7 +69,7 @@ fun YallaProfileScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "YY",
+                            text = if (firebaseUiState.userPhone.length > 3) firebaseUiState.userPhone.takeLast(2) else "YY",
                             fontWeight = FontWeight.ExtraBold,
                             color = YallaOrange,
                             fontSize = 22.sp
@@ -73,7 +79,7 @@ fun YallaProfileScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                text = "Jaspreet Singh",
+                                text = if (firebaseUiState.isUserLoggedIn) "Customer Account" else "Guest User",
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = YallaTextPrimary
@@ -84,7 +90,7 @@ fun YallaProfileScreen(
                                 color = YallaGold
                             ) {
                                 Text(
-                                    text = "VIP",
+                                    text = firebaseUiState.userRole,
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Black,
                                     color = Color.Black,
@@ -94,8 +100,12 @@ fun YallaProfileScreen(
                         }
 
                         Text(
-                            text = "kjass7577@gmail.com • +91 9876543210",
-                            style = MaterialTheme.typography.bodySmall.copy(color = YallaTextSecondary)
+                            text = if (firebaseUiState.userPhone.isNotEmpty()) firebaseUiState.userPhone else "+91 9876543210",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold, color = YallaOrange)
+                        )
+                        Text(
+                            text = "UID: ${if (firebaseUiState.userUid.isNotEmpty()) firebaseUiState.userUid else "Anonymous"}",
+                            style = MaterialTheme.typography.labelSmall.copy(color = Color.Gray)
                         )
                     }
                 }
@@ -160,12 +170,12 @@ fun YallaProfileScreen(
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Icon(Icons.Default.Home, contentDescription = null, tint = YallaOrange)
                         Column {
-                            Text("Home (Selected)", fontWeight = FontWeight.Bold, color = YallaTextPrimary)
-                            Text("Indiranagar 100ft Road, Bengaluru - 560038", style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray))
+                            Text("Current Location", fontWeight = FontWeight.Bold, color = YallaTextPrimary)
+                            Text(firebaseUiState.deliveryLocation, style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray))
                         }
                     }
 
-                    Divider(color = Color(0xFFF0F0F0))
+                    HorizontalDivider(color = Color(0xFFF0F0F0))
 
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Icon(Icons.Default.Work, contentDescription = null, tint = Color.Gray)
@@ -178,76 +188,80 @@ fun YallaProfileScreen(
             }
         }
 
-        // DEVELOPER ARCHITECTURE DASHBOARD SWITCHER
+        // Account & Quick Settings Section
         item {
-            Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "DEVELOPER & ARCHITECTURE DASHBOARD",
+                text = "ACCOUNT & QUICK SETTINGS",
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontWeight = FontWeight.Black,
-                    color = YallaOrange,
+                    color = YallaTextSecondary,
                     letterSpacing = 1.sp
                 )
             )
-            Spacer(modifier = Modifier.height(4.dp))
+        }
 
+        item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = BorderStroke(1.dp, YallaOrange)
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = BorderStroke(1.dp, YallaBorder)
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(Icons.Default.DeveloperMode, contentDescription = null, tint = YallaOrange)
-                        Text(
-                            text = "Switch to Backend Architecture Mode",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        )
+                Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                    // My Orders
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.selectTab(NavigationTab.YALLA_ORDERS) }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(YallaOrangeLight),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = YallaOrange, modifier = Modifier.size(20.dp))
+                            }
+                            Column {
+                                Text("My Orders", fontWeight = FontWeight.Bold, color = YallaTextPrimary, fontSize = 15.sp)
+                                Text("View past orders & live tracking", style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray))
+                            }
+                        }
+                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color.Gray)
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    HorizontalDivider(color = Color(0xFFF2F2F2), modifier = Modifier.padding(horizontal = 16.dp))
 
-                    Text(
-                        text = "Inspect Database Schemas, Razorpay Webhooks, Dunzo/Porter Dispatch Engine, and Failover specs.",
-                        style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFA6ADC8))
-                    )
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
+                    // Logout
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { firebaseViewModel.signOut() }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Button(
-                            onClick = { viewModel.selectTab(NavigationTab.BLUEPRINT) },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = YallaOrange),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("Blueprint", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFFEBEE)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Logout, contentDescription = null, tint = Color(0xFFD32F2F), modifier = Modifier.size(20.dp))
+                            }
+                            Column {
+                                Text("Logout / Switch Account", fontWeight = FontWeight.Bold, color = Color(0xFFD32F2F), fontSize = 15.sp)
+                                Text("Sign out securely and return to Phone OTP screen", style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray))
+                            }
                         }
-
-                        Button(
-                            onClick = { viewModel.selectTab(NavigationTab.SCHEMA) },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF313244)),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("Schema", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
-
-                        Button(
-                            onClick = { viewModel.selectTab(NavigationTab.RAZORPAY_SANDBOX) },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = RazorpayCyan),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("Razorpay", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
+                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color.Gray)
                     }
                 }
             }

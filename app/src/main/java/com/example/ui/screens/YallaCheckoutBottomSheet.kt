@@ -17,26 +17,45 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.firebase.FirestoreDishItem
 import com.example.data.models.DeliveryProvider
 import com.example.ui.components.VegNonVegIcon
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.ArchitectureViewModel
 import com.example.ui.viewmodel.UiState
+import com.example.ui.viewmodel.YallaFirebaseViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun YallaCheckoutBottomSheet(
     viewModel: ArchitectureViewModel,
+    firebaseViewModel: YallaFirebaseViewModel,
     uiState: UiState,
     onDismiss: () -> Unit,
     onOrderPlaced: () -> Unit
 ) {
+    val firebaseUiState by firebaseViewModel.uiState.collectAsStateWithLifecycle()
     var useCoinsDiscount by remember { mutableStateOf(true) }
-    val subtotal = uiState.cart.fold(0.0) { acc, c -> acc + (c.item.price * c.quantity) }
-    val deliveryFee = if (uiState.selectedDeliveryProvider == DeliveryProvider.DUNZO) 45.0 else 48.0
-    val promoDiscount = if (subtotal >= 200.0) 100.0 else 0.0
-    val coinsDiscount = if (useCoinsDiscount && uiState.yallaCoinsBalance >= 200) 50.0 else 0.0
-    val grandTotal = (subtotal + deliveryFee - promoDiscount - coinsDiscount).coerceAtLeast(0.0)
+
+    val isFirebaseCartActive = firebaseUiState.cart.isNotEmpty()
+
+    // Item Total / Subtotal calculation directly bound to active cart items
+    val itemTotal = if (isFirebaseCartActive) {
+        firebaseUiState.cart.sumOf { it.price * it.quantity }
+    } else {
+        uiState.cart.sumOf { it.item.price * it.quantity }
+    }
+
+    val deliveryFee = if (itemTotal > 0) {
+        if (uiState.selectedDeliveryProvider == DeliveryProvider.DUNZO) 45.0 else 48.0
+    } else 0.0
+
+    val promoDiscount = if (itemTotal >= 200.0) 100.0 else 0.0
+    val coinsDiscount = if (useCoinsDiscount && uiState.yallaCoinsBalance >= 200 && itemTotal > 0) 50.0 else 0.0
+
+    // Grand Total = (Item Total - Discounts) + Delivery Fee
+    val grandTotal = ((itemTotal - promoDiscount - coinsDiscount) + deliveryFee).coerceAtLeast(0.0)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -46,7 +65,7 @@ fun YallaCheckoutBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
             // Header
             Row(
@@ -63,7 +82,7 @@ fun YallaCheckoutBottomSheet(
                         )
                     )
                     Text(
-                        text = "From ${uiState.selectedRestaurant?.name ?: "Biryani Blues"}",
+                        text = "From ${firebaseUiState.selectedRestaurant?.name ?: uiState.selectedRestaurant?.name ?: "Biryani Blues"}",
                         style = MaterialTheme.typography.bodySmall.copy(color = YallaTextSecondary)
                     )
                 }
@@ -81,63 +100,135 @@ fun YallaCheckoutBottomSheet(
                     .weight(1f, fill = false),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Cart Items List
-                items(uiState.cart) { cartItem ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(YallaLightBg, RoundedCornerShape(12.dp))
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                if (isFirebaseCartActive) {
+                    items(firebaseUiState.cart, key = { it.itemId }) { cartItem ->
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(YallaLightBg, RoundedCornerShape(12.dp))
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            VegNonVegIcon(isVeg = cartItem.item.isVeg)
-                            Column {
-                                Text(
-                                    text = cartItem.item.name,
-                                    fontWeight = FontWeight.Bold,
-                                    color = YallaTextPrimary,
-                                    fontSize = 14.sp
-                                )
-                                Text(
-                                    text = "₹${cartItem.item.price.toInt()} each",
-                                    style = MaterialTheme.typography.bodySmall.copy(color = YallaTextSecondary)
-                                )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                VegNonVegIcon(isVeg = cartItem.isVeg)
+                                Column {
+                                    Text(
+                                        text = cartItem.name,
+                                        fontWeight = FontWeight.Bold,
+                                        color = YallaTextPrimary,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = "₹${cartItem.price.toInt()} each",
+                                        style = MaterialTheme.typography.bodySmall.copy(color = YallaTextSecondary)
+                                    )
+                                }
+                            }
+
+                            // Qty Selector
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color.White,
+                                border = BorderStroke(1.dp, YallaOrange)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clickable { firebaseViewModel.updateCartQuantity(cartItem.itemId, -1) },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("-", fontWeight = FontWeight.Bold, color = YallaOrange, fontSize = 16.sp)
+                                    }
+                                    Text(
+                                        text = "${cartItem.quantity}",
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp)
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clickable {
+                                                firebaseViewModel.addToCart(
+                                                    FirestoreDishItem(
+                                                        id = cartItem.itemId,
+                                                        name = cartItem.name,
+                                                        price = cartItem.price,
+                                                        isVeg = cartItem.isVeg
+                                                    )
+                                                )
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("+", fontWeight = FontWeight.Bold, color = YallaOrange, fontSize = 16.sp)
+                                    }
+                                }
                             }
                         }
-
-                        // Qty Selector
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color.White,
-                            border = BorderStroke(1.dp, YallaOrange)
+                    }
+                } else {
+                    items(uiState.cart, key = { it.item.id }) { cartItem ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(YallaLightBg, RoundedCornerShape(12.dp))
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clickable { viewModel.removeFromCart(cartItem.item) },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("-", fontWeight = FontWeight.Bold, color = YallaOrange)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                VegNonVegIcon(isVeg = cartItem.item.isVeg)
+                                Column {
+                                    Text(
+                                        text = cartItem.item.name,
+                                        fontWeight = FontWeight.Bold,
+                                        color = YallaTextPrimary,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = "₹${cartItem.item.price.toInt()} each",
+                                        style = MaterialTheme.typography.bodySmall.copy(color = YallaTextSecondary)
+                                    )
                                 }
-                                Text(
-                                    text = "${cartItem.quantity}",
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 8.dp)
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clickable { viewModel.addToCart(cartItem.item) },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("+", fontWeight = FontWeight.Bold, color = YallaOrange)
+                            }
+
+                            // Qty Selector
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color.White,
+                                border = BorderStroke(1.dp, YallaOrange)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clickable { viewModel.removeFromCart(cartItem.item) },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("-", fontWeight = FontWeight.Bold, color = YallaOrange, fontSize = 16.sp)
+                                    }
+                                    Text(
+                                        text = "${cartItem.quantity}",
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp)
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clickable { viewModel.addToCart(cartItem.item) },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("+", fontWeight = FontWeight.Bold, color = YallaOrange, fontSize = 16.sp)
+                                    }
                                 }
                             }
                         }
@@ -145,28 +236,30 @@ fun YallaCheckoutBottomSheet(
                 }
 
                 // Coupon Applied Banner
-                item {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = YallaOrangeLight,
-                        border = BorderStroke(1.dp, YallaOrange.copy(alpha = 0.4f))
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .padding(12.dp)
-                                .fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                if (promoDiscount > 0) {
+                    item {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = YallaOrangeLight,
+                            border = BorderStroke(1.dp, YallaOrange.copy(alpha = 0.4f))
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Icon(Icons.Default.LocalOffer, contentDescription = null, tint = YallaOrange)
-                                Column {
-                                    Text("YALLA50 PROMO APPLIED", fontWeight = FontWeight.Bold, color = YallaOrangeDark, fontSize = 13.sp)
-                                    Text("₹100 discount unlocked on this order", style = MaterialTheme.typography.bodySmall.copy(color = YallaOrangeDark))
+                            Row(
+                                modifier = Modifier
+                                    .padding(12.dp)
+                                    .fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Icon(Icons.Default.LocalOffer, contentDescription = null, tint = YallaOrange)
+                                    Column {
+                                        Text("YALLA50 PROMO APPLIED", fontWeight = FontWeight.Bold, color = YallaOrangeDark, fontSize = 13.sp)
+                                        Text("₹100 discount unlocked on this order", style = MaterialTheme.typography.bodySmall.copy(color = YallaOrangeDark))
+                                    }
                                 }
+                                Text("✓", fontWeight = FontWeight.Black, color = YallaOrange)
                             }
-                            Text("✓", fontWeight = FontWeight.Black, color = YallaOrange)
                         }
                     }
                 }
@@ -225,7 +318,7 @@ fun YallaCheckoutBottomSheet(
 
                 // Bill Details Breakdown
                 item {
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
@@ -235,7 +328,7 @@ fun YallaCheckoutBottomSheet(
                             Text("BILL DETAILS", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, color = YallaTextSecondary))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("Item Total", color = YallaTextSecondary, fontSize = 13.sp)
-                                Text("₹${subtotal.toInt()}", fontWeight = FontWeight.Bold)
+                                Text("₹${itemTotal.toInt()}", fontWeight = FontWeight.Bold)
                             }
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("Delivery Partner Fee", color = YallaTextSecondary, fontSize = 13.sp)
@@ -253,7 +346,7 @@ fun YallaCheckoutBottomSheet(
                                     Text("-₹${coinsDiscount.toInt()}", fontWeight = FontWeight.Bold, color = YallaOrange)
                                 }
                             }
-                            Divider(color = Color.LightGray, modifier = Modifier.padding(vertical = 4.dp))
+                            HorizontalDivider(color = Color.LightGray, modifier = Modifier.padding(vertical = 4.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("Grand Total", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                                 Text("₹${grandTotal.toInt()}", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold, color = YallaOrange))
@@ -268,12 +361,15 @@ fun YallaCheckoutBottomSheet(
             // Pay & Place Order Button
             Button(
                 onClick = {
+                    if (isFirebaseCartActive) {
+                        firebaseViewModel.placeOrderToFirestore()
+                    }
                     onOrderPlaced()
                     viewModel.runFullPipelineSimulation()
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp),
+                    .height(52.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = YallaOrange),
                 shape = RoundedCornerShape(16.dp)
             ) {

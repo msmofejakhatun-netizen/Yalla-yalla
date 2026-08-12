@@ -69,3 +69,11 @@ data class FirestoreOrderItem(
     var updatedAt: Long = System.currentTimeMillis()
 )
 
+@IgnoreExtraProperties
+data class FirestoreUserProfile(
+    var uid: String = "",
+    var phoneNumber: String = "",
+    var role: String = "CUSTOMER", // "CUSTOMER" or "RESTAURANT_OWNER"
+    var createdAt: Long = System.currentTimeMillis()
+)
+

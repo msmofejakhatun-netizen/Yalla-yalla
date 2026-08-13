@@ -302,6 +302,26 @@ class YallaFirebaseViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch {
             _uiState.update { it.copy(isFetchingLocation = true) }
             val locationHelper = LocationHelper(context)
+
+            // Check if device Location/GPS service is enabled
+            if (!locationHelper.isLocationEnabled()) {
+                _uiState.update {
+                    it.copy(
+                        isFetchingLocation = false,
+                        statusMessage = "Location/GPS is turned off. Opening Location Settings..."
+                    )
+                }
+                try {
+                    val intent = android.content.Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
+                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    android.util.Log.e("YallaFirebaseVM", "Failed to open location settings: ${e.message}")
+                }
+                return@launch
+            }
+
             val loc = locationHelper.getCurrentLocation()
             if (loc != null) {
                 _uiState.update {
@@ -316,6 +336,7 @@ class YallaFirebaseViewModel(application: Application) : AndroidViewModel(applic
                         statusMessage = "Updated Location: ${loc.area}"
                     )
                 }
+                updateRestaurantDistances(loc.latitude, loc.longitude)
             } else {
                 _uiState.update {
                     it.copy(
@@ -328,6 +349,46 @@ class YallaFirebaseViewModel(application: Application) : AndroidViewModel(applic
                     )
                 }
             }
+        }
+    }
+
+    fun updateRestaurantDistances(userLat: Double, userLng: Double) {
+        val currentRests = _uiState.value.restaurants
+        if (currentRests.isEmpty()) return
+
+        val updated = currentRests.map { rest ->
+            var calculatedDistKm = 2.5
+            var formattedDistStr = "2.5 km • ${rest.deliveryTimeMins} mins"
+
+            if (userLat != 0.0 && userLng != 0.0 && rest.latitude != 0.0 && rest.longitude != 0.0) {
+                try {
+                    val results = FloatArray(1)
+                    android.location.Location.distanceBetween(
+                        userLat, userLng,
+                        rest.latitude, rest.longitude,
+                        results
+                    )
+                    val distMeters = results[0]
+                    calculatedDistKm = kotlin.math.round(distMeters / 100.0) / 10.0
+                    if (calculatedDistKm < 0.1) calculatedDistKm = 0.5
+                    val estimatedMins = (rest.deliveryTimeMins + (calculatedDistKm * 3)).toInt()
+                    formattedDistStr = "$calculatedDistKm km • $estimatedMins mins"
+                } catch (e: Exception) {
+                    calculatedDistKm = 2.5
+                    formattedDistStr = "2.5 km • 25 mins"
+                }
+            }
+            rest.copy(
+                distanceKm = calculatedDistKm,
+                formattedDistance = formattedDistStr
+            )
+        }
+
+        _uiState.update { state ->
+            state.copy(
+                restaurants = updated,
+                filteredRestaurants = filterRestaurants(updated, state.selectedCategory, state.searchQuery)
+            )
         }
     }
 
@@ -365,13 +426,15 @@ class YallaFirebaseViewModel(application: Application) : AndroidViewModel(applic
 
             // 2. Realtime Restaurants
             launch {
-                firebaseRepo.getRealtimeRestaurants()
+                val currentLat = _uiState.value.latitude ?: 0.0
+                val currentLng = _uiState.value.longitude ?: 0.0
+                firebaseRepo.getRealtimeRestaurants(currentLat, currentLng)
                     .catch { e ->
-                        android.util.Log.e("FirestoreDebug", "ViewModel caught restaurants error: ${e.message}")
+                        android.util.Log.e("FirestoreRestaurant", "ViewModel caught restaurants error: ${e.message}")
                         _uiState.update { it.copy(errorMessage = "Restaurants error: ${e.message}", isLoading = false) }
                     }
                     .collect { rests ->
-                        android.util.Log.d("FirestoreDebug", "ViewModel received ${rests.size} restaurants")
+                        android.util.Log.d("FirestoreRestaurant", "ViewModel received ${rests.size} restaurants")
                         _uiState.update { state ->
                             val updatedSelectedRest = state.selectedRestaurant ?: rests.firstOrNull()
                             state.copy(
@@ -381,32 +444,18 @@ class YallaFirebaseViewModel(application: Application) : AndroidViewModel(applic
                                 isLoading = false
                             )
                         }
-                        if (rests.isNotEmpty() && _uiState.value.menuItems.isEmpty()) {
-                            val firstRestId = rests.first().id
-                            android.util.Log.d("FirestoreDebug", "Triggering realtime menu for first restaurant: $firstRestId")
-                            launch {
-                                firebaseRepo.getRealtimeMenu(firstRestId)
-                                    .catch { e -> android.util.Log.e("FirestoreDebug", "Menu error for $firstRestId: ${e.message}") }
-                                    .collect { dishes ->
-                                        _uiState.update { state ->
-                                            state.copy(
-                                                menuItems = dishes,
-                                                filteredMenuItems = filterDishes(dishes, state.selectedCategory, state.searchQuery)
-                                            )
-                                        }
-                                    }
-                            }
-                        }
                     }
             }
 
-            // 3. Realtime Menu Items
+            // 3. Realtime Popular Dishes (Collection Group Query across all restaurants)
             launch {
-                firebaseRepo.getRealtimeMenu("rest_yalla_1")
+                firebaseRepo.getAllRealtimeDishes()
                     .catch { e ->
-                        _uiState.update { it.copy(errorMessage = "Menu error: ${e.message}") }
+                        android.util.Log.e("FirestoreDebug", "ViewModel caught collectionGroup dishes error: ${e.message}")
+                        _uiState.update { it.copy(errorMessage = "Popular dishes error: ${e.message}") }
                     }
                     .collect { dishes ->
+                        android.util.Log.d("FirestoreDebug", "ViewModel received ${dishes.size} popular dishes")
                         _uiState.update { state ->
                             state.copy(
                                 menuItems = dishes,
@@ -444,6 +493,9 @@ class YallaFirebaseViewModel(application: Application) : AndroidViewModel(applic
         query: String
     ): List<FirestoreRestaurantItem> {
         return rests.filter { rest ->
+            val isRestaurantActive = rest.isOpen || rest.isActive
+            if (!isRestaurantActive) return@filter false
+
             val matchesCat = if (category == "All" || category.isEmpty()) {
                 true
             } else if (category == "Yalla Specials") {

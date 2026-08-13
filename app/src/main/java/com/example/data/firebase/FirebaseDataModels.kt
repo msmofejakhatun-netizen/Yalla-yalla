@@ -26,7 +26,12 @@ data class FirestoreRestaurantItem(
     var address: String = "Koramangala, Bengaluru",
     var imageUrl: String = "",
     @get:PropertyName("isPromoted") @set:PropertyName("isPromoted") var isPromoted: Boolean = false,
-    @get:PropertyName("isOpen") @set:PropertyName("isOpen") var isOpen: Boolean = true
+    @get:PropertyName("isOpen") @set:PropertyName("isOpen") var isOpen: Boolean = true,
+    var latitude: Double = 0.0,
+    var longitude: Double = 0.0,
+    @get:PropertyName("isActive") @set:PropertyName("isActive") var isActive: Boolean = true,
+    var distanceKm: Double = 2.5,
+    var formattedDistance: String = "2.5 km • 25 mins"
 )
 
 @IgnoreExtraProperties

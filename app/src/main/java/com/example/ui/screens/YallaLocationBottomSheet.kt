@@ -28,6 +28,7 @@ import com.example.ui.viewmodel.YallaFirebaseViewModel
 fun YallaLocationBottomSheet(
     firebaseViewModel: YallaFirebaseViewModel,
     uiState: FirebaseUiState,
+    onRequestLocation: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -109,7 +110,11 @@ fun YallaLocationBottomSheet(
             // Button to Re-trigger Live GPS Fetch
             Button(
                 onClick = {
-                    firebaseViewModel.fetchLiveLocation(context)
+                    if (onRequestLocation != null) {
+                        onRequestLocation()
+                    } else {
+                        firebaseViewModel.fetchLiveLocation(context)
+                    }
                 },
                 enabled = !uiState.isFetchingLocation,
                 shape = RoundedCornerShape(12.dp),

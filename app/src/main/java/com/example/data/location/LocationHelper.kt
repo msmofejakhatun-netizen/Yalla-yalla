@@ -4,11 +4,17 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Address
 import android.location.Geocoder
+import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
+import android.os.Bundle
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
+import kotlin.coroutines.resume
 
 data class LocationData(
     val fullAddress: String,
@@ -21,11 +27,24 @@ data class LocationData(
 
 class LocationHelper(private val context: Context) {
 
+    /**
+     * Checks whether Location/GPS service is enabled on the device.
+     */
+    fun isLocationEnabled(): Boolean {
+        return try {
+            val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return false
+            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                    locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     @SuppressLint("MissingPermission")
     suspend fun getCurrentLocation(): LocationData? = withContext(Dispatchers.IO) {
-        var location: android.location.Location? = null
+        var location: Location? = null
 
-        // Pure Android framework LocationManager (no GMS GoogleApiManager dependencies or broker errors)
+        // 1. Query Android System LocationManager across enabled providers
         try {
             val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
             if (locationManager != null) {
@@ -34,6 +53,8 @@ class LocationHelper(private val context: Context) {
                     LocationManager.NETWORK_PROVIDER,
                     LocationManager.PASSIVE_PROVIDER
                 )
+
+                // Try cached last known locations first
                 for (provider in providers) {
                     try {
                         if (locationManager.isProviderEnabled(provider)) {
@@ -48,19 +69,65 @@ class LocationHelper(private val context: Context) {
                         Log.w("LocationHelper", "Error checking provider $provider: ${e.message}")
                     }
                 }
+
+                // If cached location is null, request a single location update with timeout
+                if (location == null) {
+                    val activeProvider = when {
+                        locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
+                        locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
+                        else -> null
+                    }
+
+                    if (activeProvider != null) {
+                        location = withTimeoutOrNull(5000L) {
+                            suspendCancellableCoroutine { continuation ->
+                                val listener = object : LocationListener {
+                                    override fun onLocationChanged(loc: Location) {
+                                        try {
+                                            locationManager.removeUpdates(this)
+                                        } catch (e: Exception) { }
+                                        if (continuation.isActive) continuation.resume(loc)
+                                    }
+                                    @Deprecated("Deprecated in API 29")
+                                    override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+                                    override fun onProviderEnabled(provider: String) {}
+                                    override fun onProviderDisabled(provider: String) {
+                                        if (continuation.isActive) continuation.resume(null)
+                                    }
+                                }
+
+                                try {
+                                    locationManager.requestSingleUpdate(activeProvider, listener, context.mainLooper)
+                                } catch (e: Exception) {
+                                    if (continuation.isActive) continuation.resume(null)
+                                }
+
+                                continuation.invokeOnCancellation {
+                                    try {
+                                        locationManager.removeUpdates(listener)
+                                    } catch (e: Exception) { }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         } catch (e: Throwable) {
-            Log.w("LocationHelper", "LocationManager error: ${e.message}")
+            Log.w("LocationHelper", "LocationManager query error: ${e.message}")
         }
 
-        // Resolve address or return default Bengaluru hub
+        // 2. Perform Reverse Geocoding on IO Dispatcher or return formatted location data
         if (location != null) {
             val address = reverseGeocode(location.latitude, location.longitude)
             if (address != null) {
-                val area = address.subLocality ?: address.thoroughfare ?: address.featureName ?: "Indiranagar 100ft Rd"
-                val city = address.locality ?: address.subAdminArea ?: "Bengaluru"
+                val area = address.subLocality
+                    ?: address.thoroughfare
+                    ?: address.subThoroughfare
+                    ?: address.featureName
+                    ?: "Current Location"
+                val city = address.locality ?: address.subAdminArea ?: address.adminArea ?: "Bengaluru"
                 val pincode = address.postalCode ?: "560038"
-                val fullAddress = "📍 $area, $city - $pincode"
+                val fullAddress = if (pincode.isNotBlank()) "📍 $area, $city - $pincode" else "📍 $area, $city"
                 LocationData(
                     fullAddress = fullAddress,
                     area = area,
@@ -80,7 +147,7 @@ class LocationHelper(private val context: Context) {
                 )
             }
         } else {
-            Log.i("LocationHelper", "Returning default Bengaluru location")
+            Log.i("LocationHelper", "No GPS location returned, using default Bengaluru location")
             LocationData(
                 fullAddress = "📍 Indiranagar 100ft Rd, Bengaluru - 560038",
                 area = "Indiranagar 100ft Rd",
@@ -99,7 +166,7 @@ class LocationHelper(private val context: Context) {
             val addresses = geocoder.getFromLocation(latitude, longitude, 1)
             if (!addresses.isNullOrEmpty()) addresses[0] else null
         } catch (e: Exception) {
-            Log.e("LocationHelper", "Geocoding error: ${e.message}")
+            Log.e("LocationHelper", "Reverse geocoding error: ${e.message}")
             null
         }
     }

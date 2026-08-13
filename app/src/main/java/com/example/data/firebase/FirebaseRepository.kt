@@ -1,5 +1,6 @@
 package com.example.data.firebase
 
+import android.location.Location
 import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -8,6 +9,7 @@ import com.google.firebase.firestore.Query
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
 class FirebaseRepository {
@@ -153,11 +155,11 @@ class FirebaseRepository {
     /**
      * Real-Time Firestore Restaurants Flow `/restaurants`
      */
-    fun getRealtimeRestaurants(): Flow<List<FirestoreRestaurantItem>> = callbackFlow {
+    fun getRealtimeRestaurants(userLat: Double = 0.0, userLng: Double = 0.0): Flow<List<FirestoreRestaurantItem>> = callbackFlow {
         try {
             val db = firestore
             if (db == null) {
-                Log.e("FirestoreDebug", "Firestore instance is null in getRealtimeRestaurants")
+                Log.e("FirestoreRestaurant", "Firestore instance is null in getRealtimeRestaurants")
                 trySend(emptyList())
                 awaitClose { }
                 return@callbackFlow
@@ -165,90 +167,154 @@ class FirebaseRepository {
             val query = db.collection("restaurants")
             val listener = query.addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e("FirestoreDebug", "Firestore restaurants listener error: ${error.message}", error)
+                    Log.e("FirestoreRestaurant", "Firestore restaurants listener error: ${error.message}", error)
                     trySend(emptyList())
                     return@addSnapshotListener
                 }
 
                 val docCount = snapshot?.documents?.size ?: 0
-                Log.d("FirestoreDebug", "Fetched $docCount restaurants")
 
                 if (snapshot != null && !snapshot.isEmpty) {
                     val rests = snapshot.documents.mapNotNull { doc ->
                         try {
-                            var item = doc.toObject(FirestoreRestaurantItem::class.java)
                             val data = doc.data
-                            if (item == null || data != null) {
-                                val nameVal = (doc.getString("name") 
-                                    ?: doc.getString("title") 
-                                    ?: doc.getString("restaurantName") 
-                                    ?: item?.name ?: "").ifBlank { "Restaurant ${doc.id}" }
-                                val cuisineVal = (doc.getString("cuisine") 
-                                    ?: doc.getString("category") 
-                                    ?: item?.cuisine ?: "Multi-Cuisine")
-                                val ratingVal = (doc.get("rating") as? Number)?.toDouble() ?: item?.rating ?: 4.5
-                                val deliveryVal = (doc.get("deliveryTimeMins") as? Number)?.toInt() 
-                                    ?: (doc.get("delivery_time") as? Number)?.toInt() 
-                                    ?: (doc.get("deliveryTime") as? Number)?.toInt() 
-                                    ?: item?.deliveryTimeMins ?: 25
-                                val priceVal = (doc.get("priceForTwo") as? Number)?.toDouble() 
-                                    ?: (doc.get("price_for_two") as? Number)?.toDouble() 
-                                    ?: (doc.get("price") as? Number)?.toDouble() 
-                                    ?: item?.priceForTwo ?: 300.0
-                                val addressVal = (doc.getString("address") ?: doc.getString("location") ?: item?.address ?: "")
-                                val imageVal = (doc.getString("imageUrl") ?: doc.getString("image") ?: doc.getString("bannerUrl") ?: item?.imageUrl ?: "")
-                                val isPromotedVal = (doc.getBoolean("isPromoted") ?: doc.getBoolean("is_promoted") ?: item?.isPromoted ?: false)
-                                val isOpenVal = (doc.getBoolean("isOpen") ?: doc.getBoolean("is_open") ?: doc.getBoolean("isActive") ?: doc.getBoolean("is_active") ?: item?.isOpen ?: true)
+                            val nameVal = (doc.getString("name") 
+                                ?: doc.getString("title") 
+                                ?: doc.getString("restaurantName") 
+                                ?: (data?.get("name") as? String) 
+                                ?: "").ifBlank { "Restaurant ${doc.id}" }
 
-                                item = FirestoreRestaurantItem(
-                                    id = doc.id,
-                                    name = nameVal,
-                                    cuisine = cuisineVal,
-                                    rating = ratingVal,
-                                    deliveryTimeMins = deliveryVal,
-                                    priceForTwo = priceVal,
-                                    address = addressVal,
-                                    imageUrl = imageVal,
-                                    isPromoted = isPromotedVal,
-                                    isOpen = isOpenVal
-                                )
-                            } else {
-                                item.apply {
-                                    if (id.isEmpty()) id = doc.id
-                                }
+                            val cuisineVal = (doc.getString("cuisine") 
+                                ?: doc.getString("category") 
+                                ?: (data?.get("cuisine") as? String) 
+                                ?: "Multi-Cuisine").ifBlank { "Multi-Cuisine" }
+
+                            val ratingVal = parseDoubleGracefully(
+                                doc.get("rating") ?: data?.get("rating"),
+                                4.5
+                            )
+
+                            val deliveryVal = (doc.get("deliveryTimeMins") as? Number)?.toInt() 
+                                ?: (doc.get("delivery_time") as? Number)?.toInt() 
+                                ?: (doc.get("deliveryTime") as? Number)?.toInt() 
+                                ?: (data?.get("deliveryTimeMins") as? Number)?.toInt() 
+                                ?: 25
+
+                            val priceVal = parseDoubleGracefully(
+                                doc.get("priceForTwo") ?: doc.get("price_for_two") ?: doc.get("price") ?: data?.get("priceForTwo"),
+                                300.0
+                            )
+
+                            val addressVal = (doc.getString("address") 
+                                ?: doc.getString("location") 
+                                ?: (data?.get("address") as? String) 
+                                ?: "")
+
+                            val imageVal = (doc.getString("imageUrl") 
+                                ?: doc.getString("image") 
+                                ?: doc.getString("bannerUrl") 
+                                ?: (data?.get("imageUrl") as? String) 
+                                ?: "")
+
+                            val isPromotedVal = parseBooleanGracefully(
+                                doc.get("isPromoted") ?: doc.get("is_promoted") ?: data?.get("isPromoted"),
+                                defaultVal = false
+                            )
+
+                            // Check for both isOpen == true OR isActive == true when parsing restaurant documents.
+                            // If isOpen is true, treat the restaurant as active.
+                            val rawIsOpen = doc.get("isOpen") ?: doc.get("is_open") ?: data?.get("isOpen")
+                            val rawIsActive = doc.get("isActive") ?: doc.get("is_active") ?: data?.get("isActive")
+
+                            val isOpenParsed = if (rawIsOpen != null) parseBooleanGracefully(rawIsOpen, true) else null
+                            val isActiveParsed = if (rawIsActive != null) parseBooleanGracefully(rawIsActive, true) else null
+
+                            val isRestaurantActive = when {
+                                isOpenParsed != null && isActiveParsed != null -> isOpenParsed || isActiveParsed
+                                isOpenParsed != null -> isOpenParsed
+                                isActiveParsed != null -> isActiveParsed
+                                else -> true
                             }
-                            Log.d("FirestoreDebug", "Parsed restaurant: ${item.id} -> ${item.name}")
-                            item
+
+                            // Do NOT strictly hide restaurants if their latitude/longitude fields are missing, 0.0, or outside the radius.
+                            val restLat = parseDoubleGracefully(doc.get("latitude") ?: doc.get("lat") ?: data?.get("latitude"), 0.0)
+                            val restLng = parseDoubleGracefully(doc.get("longitude") ?: doc.get("lng") ?: data?.get("longitude"), 0.0)
+
+                            // 2. GEOLOCATION DISTANCE LOGIC:
+                            // Calculate distance dynamically using Android Location.distanceBetween().
+                            // If distance calculation fails or coordinates are missing in Firestore, default distance display to "2.5 km • 25 mins" so the card renders safely.
+                            var calculatedDistKm = 2.5
+                            var formattedDistStr = "2.5 km • $deliveryVal mins"
+
+                            if (userLat != 0.0 && userLng != 0.0 && restLat != 0.0 && restLng != 0.0) {
+                                try {
+                                    val results = FloatArray(1)
+                                    Location.distanceBetween(
+                                        userLat, userLng,
+                                        restLat, restLng,
+                                        results
+                                    )
+                                    val distMeters = results[0]
+                                    calculatedDistKm = kotlin.math.round(distMeters / 100.0) / 10.0 // rounded to 1 decimal place
+                                    if (calculatedDistKm < 0.1) calculatedDistKm = 0.5
+                                    val estimatedMins = (deliveryVal + (calculatedDistKm * 3)).toInt()
+                                    formattedDistStr = "$calculatedDistKm km • $estimatedMins mins"
+                                } catch (e: Exception) {
+                                    Log.w("FirestoreRestaurant", "Distance calculation error for ${doc.id}: ${e.message}")
+                                    calculatedDistKm = 2.5
+                                    formattedDistStr = "2.5 km • 25 mins"
+                                }
+                            } else {
+                                calculatedDistKm = 2.5
+                                formattedDistStr = "2.5 km • $deliveryVal mins"
+                            }
+
+                            FirestoreRestaurantItem(
+                                id = doc.id,
+                                name = nameVal,
+                                cuisine = cuisineVal,
+                                rating = ratingVal,
+                                deliveryTimeMins = deliveryVal,
+                                priceForTwo = priceVal,
+                                address = addressVal,
+                                imageUrl = imageVal,
+                                isPromoted = isPromotedVal,
+                                isOpen = isRestaurantActive,
+                                latitude = restLat,
+                                longitude = restLng,
+                                isActive = isRestaurantActive,
+                                distanceKm = calculatedDistKm,
+                                formattedDistance = formattedDistStr
+                            )
                         } catch (e: Exception) {
-                            Log.e("FirestoreDebug", "Failed to deserialize restaurant doc ${doc.id}: ${e.message}", e)
-                            val data = doc.data
-                            if (data != null) {
-                                FirestoreRestaurantItem(
-                                    id = doc.id,
-                                    name = (data["name"] as? String) ?: (data["title"] as? String) ?: "Restaurant ${doc.id}",
-                                    cuisine = (data["cuisine"] as? String) ?: "Multi-Cuisine",
-                                    rating = (data["rating"] as? Number)?.toDouble() ?: 4.5,
-                                    deliveryTimeMins = (data["deliveryTimeMins"] as? Number)?.toInt() ?: 25,
-                                    priceForTwo = (data["priceForTwo"] as? Number)?.toDouble() ?: 300.0,
-                                    address = (data["address"] as? String) ?: "",
-                                    imageUrl = (data["imageUrl"] as? String) ?: (data["image"] as? String) ?: "",
-                                    isPromoted = (data["isPromoted"] as? Boolean) ?: false,
-                                    isOpen = (data["isOpen"] as? Boolean) ?: true
-                                )
-                            } else null
+                            Log.e("FirestoreRestaurant", "Error parsing restaurant ${doc.id}: ${e.message}", e)
+                            FirestoreRestaurantItem(
+                                id = doc.id,
+                                name = "Restaurant ${doc.id}",
+                                cuisine = "Multi-Cuisine",
+                                rating = 4.5,
+                                deliveryTimeMins = 25,
+                                priceForTwo = 300.0,
+                                address = "",
+                                imageUrl = "",
+                                isPromoted = false,
+                                isOpen = true
+                            )
                         }
                     }
-                    Log.d("FirestoreDebug", "Successfully mapped ${rests.size} valid restaurants out of $docCount documents")
+
+                    // 3. LOGGING & DEBUGGING:
+                    Log.d("FirestoreRestaurant", "Fetched ${rests.size} restaurants for current location")
                     trySend(rests)
                 } else {
-                    Log.d("FirestoreDebug", "Snapshot is null or empty for /restaurants")
+                    Log.d("FirestoreRestaurant", "Fetched 0 restaurants for current location")
                     trySend(emptyList())
                 }
             }
             restaurantListenerRegistration = listener
             awaitClose { listener.remove() }
         } catch (e: Exception) {
-            Log.e("FirestoreDebug", "Exception in getRealtimeRestaurants: ${e.message}", e)
+            Log.e("FirestoreRestaurant", "Exception in getRealtimeRestaurants: ${e.message}", e)
             trySend(emptyList())
             awaitClose { }
         }
@@ -290,10 +356,138 @@ class FirebaseRepository {
     }
 
     /**
-     * Real-Time Firestore Menu Flow
+     * Real-Time Firestore Collection Group Query for Popular Dishes across all restaurants.
+     * Queries /restaurants/{id}/menu via collectionGroup("menu")
+     */
+    fun getAllRealtimeDishes(): Flow<List<FirestoreDishItem>> = callbackFlow {
+        try {
+            val db = firestore
+            if (db == null) {
+                Log.e("FirestoreDebug", "Firestore instance is null in getAllRealtimeDishes")
+                trySend(emptyList())
+                awaitClose { }
+                return@callbackFlow
+            }
+
+            Log.d("FirestoreDebug", "Subscribing addSnapshotListener to collectionGroup('menu')")
+
+            val query = db.collectionGroup("menu")
+            val listener = query.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("FirestoreDebug", "Firestore collectionGroup('menu') listener error: ${error.message}", error)
+                    trySend(emptyList())
+                    return@addSnapshotListener
+                }
+
+                val docCount = snapshot?.documents?.size ?: 0
+                Log.d("FirestoreDebug", "CollectionGroup('menu') update: Fetched $docCount menu items across all restaurants")
+
+                if (snapshot != null && !snapshot.isEmpty) {
+                    val dishes = snapshot.documents.mapNotNull { doc ->
+                        try {
+                            val data = doc.data
+                            val parentRestId = doc.reference.parent.parent?.id
+                                ?: (data?.get("restaurantId") as? String)
+                                ?: (data?.get("restId") as? String)
+                                ?: ""
+
+                            val nameVal = (doc.getString("name") 
+                                ?: doc.getString("title") 
+                                ?: doc.getString("dishName") 
+                                ?: (data?.get("name") as? String) 
+                                ?: (data?.get("title") as? String)
+                                ?: "").ifBlank { "Dish ${doc.id}" }
+
+                            val categoryVal = (doc.getString("category") 
+                                ?: doc.getString("cuisine") 
+                                ?: (data?.get("category") as? String) 
+                                ?: "Popular").ifBlank { "Popular" }
+
+                            val rawPrice = doc.get("price") ?: doc.get("amount") ?: doc.get("cost") ?: doc.get("rate") ?: data?.get("price")
+                            val priceVal = parseDoubleGracefully(rawPrice, 0.0)
+
+                            val isVegVal = parseBooleanGracefully(
+                                doc.get("isVeg") ?: doc.get("is_veg") ?: doc.get("veg") ?: data?.get("isVeg"),
+                                defaultVal = true
+                            )
+
+                            val inStockVal = parseInStockGracefully(
+                                doc.get("inStock") ?: doc.get("in_stock") ?: doc.get("isAvailable") ?: doc.get("is_available") ?: data?.get("inStock")
+                            )
+
+                            val imageVal = (doc.getString("imageUrl") 
+                                ?: doc.getString("image") 
+                                ?: doc.getString("bannerUrl") 
+                                ?: (data?.get("imageUrl") as? String) 
+                                ?: "")
+
+                            val descVal = (doc.getString("description") 
+                                ?: (data?.get("description") as? String) 
+                                ?: "")
+
+                            val rawRating = doc.get("rating") ?: data?.get("rating")
+                            val ratingVal = parseDoubleGracefully(rawRating, 4.8)
+
+                            FirestoreDishItem(
+                                id = doc.id,
+                                restaurantId = parentRestId,
+                                name = nameVal,
+                                category = categoryVal,
+                                price = priceVal,
+                                isVeg = isVegVal,
+                                inStock = inStockVal,
+                                imageUrl = imageVal,
+                                description = descVal,
+                                rating = ratingVal
+                            )
+                        } catch (e: Exception) {
+                            Log.e("FirestoreDebug", "Error parsing collectionGroup menu item ${doc.id}: ${e.message}", e)
+                            FirestoreDishItem(
+                                id = doc.id,
+                                restaurantId = doc.reference.parent.parent?.id ?: "",
+                                name = "Dish ${doc.id}",
+                                category = "Popular",
+                                price = 0.0,
+                                isVeg = true,
+                                inStock = true,
+                                imageUrl = "",
+                                description = "",
+                                rating = 4.8
+                            )
+                        }
+                    }
+                    Log.d("FirestoreDebug", "Emitting ${dishes.size} dishes from collectionGroup('menu')")
+                    trySend(dishes)
+                } else {
+                    Log.d("FirestoreDebug", "CollectionGroup('menu') snapshot is empty")
+                    trySend(emptyList())
+                }
+            }
+
+            awaitClose {
+                Log.d("FirestoreDebug", "Closing snapshot listener for collectionGroup('menu')")
+                listener.remove()
+            }
+        } catch (e: Exception) {
+            Log.e("FirestoreDebug", "Exception in getAllRealtimeDishes: ${e.message}", e)
+            trySend(emptyList())
+            awaitClose { }
+        }
+    }
+
+    /**
+     * Real-Time Firestore Menu Flow for specific restaurant
      * Listens to `/restaurants/{restaurantId}/menu` with active addSnapshotListener
      */
-    fun getRealtimeMenu(restaurantId: String = "rest_yalla_1"): Flow<List<FirestoreDishItem>> = callbackFlow {
+    fun getRealtimeMenu(restaurantId: String = ""): Flow<List<FirestoreDishItem>> = callbackFlow {
+        if (restaurantId.isBlank() || restaurantId == "ALL") {
+            val job = this.launch {
+                getAllRealtimeDishes().collect { trySend(it) }
+            }
+            awaitClose { job.cancel() }
+            return@callbackFlow
+        }
+
         try {
             val db = firestore
             if (db == null) {
@@ -302,7 +496,7 @@ class FirebaseRepository {
                 awaitClose { }
                 return@callbackFlow
             }
-            val targetRestId = if (restaurantId.isBlank()) "rest_yalla_1" else restaurantId
+            val targetRestId = restaurantId
             val query = db.collection("restaurants")
                 .document(targetRestId)
                 .collection("menu")
@@ -344,7 +538,6 @@ class FirebaseRepository {
                             )
 
                             // Do NOT filter out items if inStock is missing or null.
-                            // Treat inStock == true or missing/null as valid available items.
                             val inStockVal = parseInStockGracefully(
                                 doc.get("inStock") ?: doc.get("in_stock") ?: doc.get("isAvailable") ?: doc.get("is_available")
                             )
@@ -376,7 +569,18 @@ class FirebaseRepository {
                             )
                         } catch (e: Exception) {
                             Log.e("FirestoreDebug", "Error parsing menu item doc ${doc.id}: ${e.message}", e)
-                            null
+                            FirestoreDishItem(
+                                id = doc.id,
+                                restaurantId = targetRestId,
+                                name = "Dish ${doc.id}",
+                                category = "Popular",
+                                price = 0.0,
+                                isVeg = true,
+                                inStock = true,
+                                imageUrl = "",
+                                description = "",
+                                rating = 4.8
+                            )
                         }
                     }
                     Log.d("FirestoreDebug", "Emitting ${dishes.size} menu items for restaurant $targetRestId")

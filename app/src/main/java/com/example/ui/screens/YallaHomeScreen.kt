@@ -1,5 +1,9 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -20,10 +24,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.data.firebase.*
@@ -43,7 +49,47 @@ fun YallaHomeScreen(
     onViewCartClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val firebaseUiState by firebaseViewModel.uiState.collectAsStateWithLifecycle()
+
+    // Permission launcher for ACCESS_FINE_LOCATION and ACCESS_COARSE_LOCATION
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (fineGranted || coarseGranted) {
+            firebaseViewModel.fetchLiveLocation(context)
+        }
+    }
+
+    val requestLocationAction = {
+        val fineCheck = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarseCheck = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (fineCheck || coarseCheck) {
+            firebaseViewModel.fetchLiveLocation(context)
+        } else {
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
+
+    // AUTO PERMISSION PROMPT ON APP LAUNCH:
+    // As soon as Home Screen loads, automatically check for location permissions or show permission dialog box.
+    LaunchedEffect(Unit) {
+        requestLocationAction()
+    }
 
     val categories = listOf(
         FoodCategory("1", "All", "🍽️", null),
@@ -332,6 +378,7 @@ fun YallaHomeScreen(
             YallaLocationBottomSheet(
                 firebaseViewModel = firebaseViewModel,
                 uiState = firebaseUiState,
+                onRequestLocation = requestLocationAction,
                 onDismiss = { firebaseViewModel.toggleLocationPicker(false) }
             )
         }
@@ -559,7 +606,7 @@ private fun FirestoreRestaurantCard(
                         modifier = Modifier.size(14.dp)
                     )
                     Text(
-                        text = "${restaurant.deliveryTimeMins} mins",
+                        text = restaurant.formattedDistance.ifBlank { "${restaurant.deliveryTimeMins} mins" },
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontWeight = FontWeight.Bold,
                             color = YallaTextPrimary
